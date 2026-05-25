@@ -90,6 +90,10 @@ Streger/
 
 ## Metodología
 
+## Modelo económico
+
+![Modelo económico](economia.jpg)
+
 ### Modelo de irradiancia Jensen (isótropo difuso)
 
 El modelo asume distribución uniforme (isótropa) de la radiación difusa del cielo. La irradiancia en el plano del panel (POA) se calcula como:
