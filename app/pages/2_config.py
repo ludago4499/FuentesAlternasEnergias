@@ -115,6 +115,55 @@ lon = col_lon.number_input("Longitud (°E)", value=float(lon_default or st.sessi
 alt = col_alt.number_input("Altitud (msnm)", value=st.session_state["altitude"],
                             min_value=0.0, max_value=5000.0, step=10.0)
 
+# ── Mapa interactivo ────────────────────────────────────────── (MAX)
+
+import requests
+import folium
+from streamlit_folium import st_folium
+
+def _get_altitude(lat: float, lon: float) -> float:
+    try:
+        url = f"https://api.open-meteo.com/v1/elevation?latitude={lat}&longitude={lon}"
+        r = requests.get(url, timeout=5)
+        r.raise_for_status()
+        return float(r.json()["elevation"][0])
+    except Exception:
+        return st.session_state.get("altitude", 540.0)
+
+with st.expander("🗺️ Seleccionar ubicación en mapa (opcional)", expanded=False):
+    st.caption("Haz **click** en el mapa para autorellenar latitud, longitud y altitud.")
+
+    m = folium.Map(
+        location=[lat, lon],   # usa los values que ya tienen los number_input
+        zoom_start=11,
+        tiles="CartoDB positron",
+    )
+    folium.Marker(
+        location=[lat, lon],
+        tooltip="Ubicación actual",
+        icon=folium.Icon(color="blue", icon="sun", prefix="fa"),
+    ).add_to(m)
+
+    map_data = st_folium(m, height=380, width="100%", returned_objects=["last_clicked"])
+
+    if map_data and map_data.get("last_clicked"):
+        clicked_lat = map_data["last_clicked"]["lat"]
+        clicked_lon = map_data["last_clicked"]["lng"]
+
+        with st.spinner("Obteniendo altitud..."):
+            clicked_alt = _get_altitude(clicked_lat, clicked_lon)
+
+        st.success(
+            f"📌 **{clicked_lat:.4f}° N**, **{clicked_lon:.4f}° E** — "
+            f"Altitud: **{clicked_alt:.0f} msnm**"
+        )
+
+        st.session_state["lat"]      = clicked_lat
+        st.session_state["lon"]      = clicked_lon
+        st.session_state["altitude"] = clicked_alt
+        st.session_state["city"]     = "Personalizada"
+        st.rerun()
+
 # ── PANEL SELECTION ───────────────────────────────────────────────────────────
 st.divider()
 st.markdown("## 🔆 Panel Fotovoltaico")
