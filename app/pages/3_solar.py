@@ -23,7 +23,8 @@ if "lat" not in st.session_state:
 lat = st.session_state["lat"]
 lon = st.session_state["lon"]
 tilt = st.session_state.get("tilt", 20.0)
-azimuth = st.session_state.get("azimuth", 180.0)
+azimuth_user = st.session_state.get("azimuth", 0.0)   # 0=Sur, −=Este, +=Oeste
+azimuth_pvlib = (180.0 + azimuth_user) % 360.0        # pvlib: 0=Norte, 90=Este, 180=Sur
 tz = st.session_state.get("tz", "America/Monterrey")
 altitude = st.session_state.get("altitude", 500.0)
 system_kwp = st.session_state.get("system_kwp", 50.0)
@@ -36,10 +37,11 @@ panel_wp = panel.get("wp", 580)
 panel_eta = panel.get("efficiency_pct", 22.3)
 total_panel_area_m2 = n_panels_cfg * (panel_area_m2 or panel_wp / (1000.0 * panel_eta / 100.0))
 
+az_label = f"{azimuth_user:+.0f}° ({'Sur' if azimuth_user == 0 else 'Este' if azimuth_user < 0 else 'Oeste'})"
 st.markdown(f"""
 **Ubicación:** {lat:.4f}°N, {lon:.4f}°E &nbsp;|&nbsp;
 **Inclinación:** {tilt}° &nbsp;|&nbsp;
-**Azimut:** {azimuth}° &nbsp;|&nbsp;
+**Azimut:** {az_label} &nbsp;|&nbsp;
 **Sistema:** {system_kwp:.2f} kWp &nbsp;|&nbsp;
 **Área total paneles:** {total_panel_area_m2:.1f} m²
 """)
@@ -93,7 +95,7 @@ if run_btn or "irradiance_df" in st.session_state:
         with st.spinner(f"Calculando irradiancia ({resolution}) con modelo isótropo (Jensen)…"):
             try:
                 df_irr = run_jensen_model(
-                    lat=lat, lon=lon, tilt=tilt, azimuth=azimuth,
+                    lat=lat, lon=lon, tilt=tilt, azimuth=azimuth_pvlib,
                     start_date=str(start_dt), end_date=str(end_dt),
                     tz=tz, altitude=altitude, freq=freq,
                 )

@@ -42,37 +42,46 @@ def _is_verano(ts: pd.Timestamp) -> bool:
 
 def classify_period(ts: pd.Timestamp) -> Literal["punta", "intermedia", "base"]:
     """
-    Returns 'punta', 'intermedia', or 'base' for a given timestamp.
+    CFE GDMTH period classification per official tariff schedule
+    (Regiones Central, Noreste, Noroeste, Norte, Peninsular, Sur).
 
-    CFE GDMTH schedule (regions Central, Noreste, Norte, Noroeste, Occidente, Oriente, Sur, Peninsular):
+    VERANO (1er dom. abril → sáb. anterior al último dom. octubre):
+      L–V : Base 0:00–6:00 | Intermedia 6:00–20:00, 22:00–24:00 | Punta 20:00–22:00
+      Sáb : Base 0:00–7:00 | Intermedia 7:00–24:00               | sin Punta
+      Dom : Base 0:00–19:00| Intermedia 19:00–24:00               | sin Punta
 
-    Invierno (Nov–Mar): L–V Punta 18:00–22:00 | Sáb Punta 19:00–21:00 | Dom sin Punta
-    Verano  (Abr–Oct): L–V Punta 20:00–22:00 | Sáb/Dom sin Punta
-
-    Base:       00:00–06:00 L–V | 00:00–07:00 Sáb/Dom (ambas temporadas)
-    Intermedia: todo lo demás
+    INVIERNO (último dom. octubre → sáb. anterior al 1er dom. abril):
+      L–V : Base 0:00–6:00 | Intermedia 6:00–18:00, 22:00–24:00 | Punta 18:00–22:00
+      Sáb : Base 0:00–8:00 | Intermedia 8:00–19:00, 21:00–24:00 | Punta 19:00–21:00
+      Dom : Base 0:00–18:00| Intermedia 18:00–24:00               | sin Punta
     """
     hour = ts.hour
-    weekday = ts.weekday()  # 0=Mon … 6=Sun
+    weekday = ts.weekday()   # 0=Mon … 6=Sun
     verano = _is_verano(ts)
 
-    if weekday == 6:  # Sunday — never Punta
-        return "base" if hour < 7 else "intermedia"
+    # ── Domingo y festivo — never Punta ──────────────────────────────────────
+    if weekday == 6:
+        base_limit = 19 if verano else 18
+        return "base" if hour < base_limit else "intermedia"
 
-    if weekday == 5:  # Saturday
-        if hour < 7:
-            return "base"
-        if not verano and 19 <= hour < 21:
-            return "punta"   # Invierno sábado Punta 19–21
-        return "intermedia"
+    # ── Sábado ───────────────────────────────────────────────────────────────
+    if weekday == 5:
+        if verano:
+            return "base" if hour < 7 else "intermedia"
+        else:                                  # invierno
+            if hour < 8:
+                return "base"
+            if 19 <= hour < 21:
+                return "punta"
+            return "intermedia"
 
-    # Weekday (Mon–Fri)
+    # ── Lunes a viernes ──────────────────────────────────────────────────────
     if hour < 6:
         return "base"
     if verano and 20 <= hour < 22:
-        return "punta"        # Verano Punta 20–22
+        return "punta"
     if not verano and 18 <= hour < 22:
-        return "punta"        # Invierno Punta 18–22
+        return "punta"
     return "intermedia"
 
 

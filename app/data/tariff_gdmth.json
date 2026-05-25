@@ -11,18 +11,20 @@
       "label": "Temporada Baja (Oct–Ene)"
     }
   },
-  "peak_hours": {
-    "weekday": {"start": 18, "end": 22},
-    "_comment": "Punta = 18:00–22:00 lunes a viernes (excepto festivos)"
-  },
-  "intermediate_hours": {
-    "weekday_morning": {"start": 6, "end": 18},
-    "weekday_evening": {"start": 22, "end": 24},
-    "weekend": {"start": 7, "end": 24}
-  },
-  "base_hours": {
-    "weekday_night": {"start": 0, "end": 6},
-    "weekend_night": {"start": 0, "end": 7}
+  "schedule": {
+    "_source": "CFE GDMTH acuerdo tarifario vigente — Regiones Central, Noreste, Noroeste, Norte, Peninsular, Sur",
+    "verano": {
+      "_periodo": "1er domingo de abril → sábado anterior al último domingo de octubre",
+      "lunes_viernes": {"base": "0:00–6:00", "intermedia": "6:00–20:00 y 22:00–24:00", "punta": "20:00–22:00"},
+      "sabado":        {"base": "0:00–7:00", "intermedia": "7:00–24:00",                "punta": "sin punta"},
+      "domingo":       {"base": "0:00–19:00","intermedia": "19:00–24:00",               "punta": "sin punta"}
+    },
+    "invierno": {
+      "_periodo": "último domingo de octubre → sábado anterior al 1er domingo de abril",
+      "lunes_viernes": {"base": "0:00–6:00", "intermedia": "6:00–18:00 y 22:00–24:00", "punta": "18:00–22:00"},
+      "sabado":        {"base": "0:00–8:00", "intermedia": "8:00–19:00 y 21:00–24:00", "punta": "19:00–21:00"},
+      "domingo":       {"base": "0:00–18:00","intermedia": "18:00–24:00",               "punta": "sin punta"}
+    }
   },
   "rates_by_region": {
     "Centro": {

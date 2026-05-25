@@ -69,7 +69,7 @@ def _init():
         "panel_id": PANELS[0]["id"],
         "n_panels": 100,
         "tilt": 20.0,
-        "azimuth": 180.0,
+        "azimuth": 0.0,
         "battery_id": BATTERIES[0]["id"],
         "battery_kwh": BATTERIES[0]["kwh"],
         "use_battery": False,
@@ -152,8 +152,10 @@ n_panels = col_n.number_input("Número de paneles", min_value=1, max_value=5000,
                                value=st.session_state["n_panels"], step=1)
 tilt = col_tilt.number_input("Ángulo de inclinación (°)", min_value=0.0, max_value=90.0,
                                value=st.session_state["tilt"], step=0.5)
-azimuth = col_az.number_input("Azimut del panel (°, 180=Sur)", min_value=0.0, max_value=360.0,
+azimuth = col_az.number_input("Azimut del panel (0=Sur, −=Este, +=Oeste)",
+                               min_value=-180.0, max_value=180.0,
                                value=st.session_state["azimuth"], step=1.0)
+st.caption("Azimut: **0°** = Sur (óptimo México) | **−90°** = Este | **+90°** = Oeste | **±180°** = Norte")
 
 system_kwp = (n_panels * panel["wp"]) / 1000.0
 capex_usd = n_panels * panel["wp"] * panel["usd_per_w"]
