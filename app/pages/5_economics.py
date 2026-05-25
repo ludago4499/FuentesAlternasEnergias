@@ -30,11 +30,8 @@ net_demand = st.session_state.get("net_demand")
 
 # ── Sidebar settings ──────────────────────────────────────────────────────────
 st.sidebar.markdown("### Parámetros económicos")
-bat_capex_usd = st.sidebar.number_input("CAPEX baterías (USD)", min_value=0.0,
-                                         value=st.session_state.get("battery_kwh", 0.0) *
-                                         (st.session_state.get("battery", {}) or {}).get("usd_per_kwh", 350)
-                                         if st.session_state.get("use_battery") else 0.0,
-                                         step=1000.0)
+# bat_capex_usd = st.sidebar.number_input(...)  # BATTERY — disabled for now
+bat_capex_usd = 0.0
 install_factor = st.sidebar.slider("Factor instalación sobre CAPEX (%)", 10, 40, 20)
 opex_pct = st.sidebar.slider("OPEX anual (% del CAPEX total)", 1, 5, 2)
 inflation_pct = st.sidebar.slider("Inflación tarifaria anual (%)", 0.0, 15.0, 5.0, step=0.5)
@@ -45,11 +42,11 @@ total_capex_usd = (panel_capex_usd + bat_capex_usd) * (1 + install_factor / 100)
 total_capex_mxn = total_capex_usd * usd_mxn
 
 st.markdown("### CAPEX del sistema")
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3 = st.columns(3)
 c1.metric("Paneles FV", f"${panel_capex_usd:,.0f} USD")
-c2.metric("Baterías", f"${bat_capex_usd:,.0f} USD")
-c3.metric("CAPEX total (c/instalación)", f"${total_capex_usd:,.0f} USD")
-c4.metric("CAPEX total (MXN)", f"${total_capex_mxn:,.0f} MXN")
+# c2.metric("Baterías", ...)  # BATTERY — disabled for now
+c2.metric("CAPEX total (c/instalación)", f"${total_capex_usd:,.0f} USD")
+c3.metric("CAPEX total (MXN)", f"${total_capex_mxn:,.0f} MXN")
 
 # ── Monthly calculation ───────────────────────────────────────────────────────
 st.divider()

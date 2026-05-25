@@ -11,8 +11,8 @@ DATA = Path(__file__).parent.parent / "data"
 with open(DATA / "panels.json") as f:
     PANELS = json.load(f)
 
-with open(DATA / "batteries.json") as f:
-    BATTERIES = json.load(f)
+# with open(DATA / "batteries.json") as f:   # BATTERY — disabled for now
+#     BATTERIES = json.load(f)
 
 with open(DATA / "tariff_gdmth.json") as f:
     TARIFF = json.load(f)
@@ -70,9 +70,9 @@ def _init():
         "n_panels": 100,
         "tilt": 20.0,
         "azimuth": 0.0,
-        "battery_id": BATTERIES[0]["id"],
-        "battery_kwh": BATTERIES[0]["kwh"],
-        "use_battery": False,
+        # "battery_id": BATTERIES[0]["id"],   # BATTERY — disabled for now
+        # "battery_kwh": BATTERIES[0]["kwh"],
+        # "use_battery": False,
         "region": "Noreste",
         "usd_mxn": 17.5,
         "panel_justification": "",
@@ -225,37 +225,39 @@ justification = st.text_area(
     height=100,
 )
 
-# ── BATTERY SELECTION ─────────────────────────────────────────────────────────
-st.divider()
-st.markdown("## 🔋 Sistema de Baterías (opcional)")
+# ── BATTERY SELECTION — disabled for now, uncomment to re-enable ──────────────
+# st.divider()
+# st.markdown("## 🔋 Sistema de Baterías (opcional)")
+#
+# use_battery = st.toggle("Incluir batería de almacenamiento", value=st.session_state.get("use_battery", False))
+#
+# if use_battery:
+#     bat_ids = [b["id"] for b in BATTERIES]
+#     bat_labels = [f"{b['brand']} {b['model']} — {b['kwh']} kWh | {b['cycles']} ciclos | ${b['usd_per_kwh']}/kWh"
+#                   for b in BATTERIES]
+#     cur_bat_idx = bat_ids.index(st.session_state["battery_id"]) if st.session_state.get("battery_id") in bat_ids else 0
+#     bat_idx = st.selectbox("Selecciona batería", range(len(BATTERIES)),
+#                             format_func=lambda i: bat_labels[i], index=cur_bat_idx)
+#     battery = BATTERIES[bat_idx]
+#     bat_kwh = st.slider("Capacidad instalada (kWh)", min_value=battery["kwh"],
+#                          max_value=battery["kwh"] * 10, value=st.session_state.get("battery_kwh", battery["kwh"]),
+#                          step=battery["kwh"])
+#     col_b1, col_b2, col_b3 = st.columns(3)
+#     col_b1.metric("Capacidad útil", f"{battery['usable_kwh']} kWh")
+#     col_b2.metric("Química", battery["chemistry"])
+#     col_b3.metric("Eficiencia RT", f"{battery['roundtrip_efficiency_pct']} %")
+#     bat_capex_usd = (bat_kwh / battery["kwh"]) * battery["kwh"] * battery["usd_per_kwh"]
+#     st.info(f"**CAPEX estimado baterías:** ${bat_capex_usd:,.0f} USD  |  "
+#             f"**Ciclos de vida:** {battery['cycles']:,}")
+# else:
+#     battery = None
+#     bat_kwh = 0.0
+#     bat_idx = 0
 
-use_battery = st.toggle("Incluir batería de almacenamiento", value=st.session_state["use_battery"])
-
-if use_battery:
-    bat_ids = [b["id"] for b in BATTERIES]
-    bat_labels = [f"{b['brand']} {b['model']} — {b['kwh']} kWh | {b['cycles']} ciclos | ${b['usd_per_kwh']}/kWh"
-                  for b in BATTERIES]
-    cur_bat_idx = bat_ids.index(st.session_state["battery_id"]) if st.session_state["battery_id"] in bat_ids else 0
-    bat_idx = st.selectbox("Selecciona batería", range(len(BATTERIES)),
-                            format_func=lambda i: bat_labels[i], index=cur_bat_idx)
-    battery = BATTERIES[bat_idx]
-
-    bat_kwh = st.slider("Capacidad instalada (kWh)", min_value=battery["kwh"],
-                         max_value=battery["kwh"] * 10, value=st.session_state["battery_kwh"],
-                         step=battery["kwh"])
-
-    col_b1, col_b2, col_b3 = st.columns(3)
-    col_b1.metric("Capacidad útil", f"{battery['usable_kwh']} kWh")
-    col_b2.metric("Química", battery["chemistry"])
-    col_b3.metric("Eficiencia RT", f"{battery['roundtrip_efficiency_pct']} %")
-
-    bat_capex_usd = (bat_kwh / battery["kwh"]) * battery["kwh"] * battery["usd_per_kwh"]
-    st.info(f"**CAPEX estimado baterías:** ${bat_capex_usd:,.0f} USD  |  "
-            f"**Ciclos de vida:** {battery['cycles']:,}")
-else:
-    battery = None
-    bat_kwh = 0.0
-    bat_idx = 0
+use_battery = False
+battery = None
+bat_kwh = 0.0
+bat_idx = 0
 
 # ── EXCHANGE RATE ─────────────────────────────────────────────────────────────
 st.divider()
@@ -279,10 +281,10 @@ if st.button("Guardar configuración", type="primary", use_container_width=True)
         "azimuth": azimuth,
         "system_kwp": system_kwp,
         "panel_capex_usd": capex_usd,
-        "use_battery": use_battery,
-        "battery_id": BATTERIES[bat_idx]["id"] if use_battery else st.session_state["battery_id"],
-        "battery": battery,
-        "battery_kwh": bat_kwh,
+        # "use_battery": use_battery,       # BATTERY — disabled for now
+        # "battery_id": ...,
+        # "battery": battery,
+        # "battery_kwh": bat_kwh,
         "region": region,
         "usd_mxn": usd_mxn,
         "panel_justification": justification,

@@ -99,7 +99,7 @@ with col1:
     st.markdown("""
     #### Esquema de la página
     1. **Equipo** — La información del equipo 4.
-    2. **Configuración** — Panel, batería, ubicación
+    2. **Configuración** — Panel y ubicación
     3. **Análisis Solar** — Modelo Jensen + pvlib
     4. **Demanda** — Curva de carga real
     5. **Economía** — Ahorros GDMTH + reporte PDF

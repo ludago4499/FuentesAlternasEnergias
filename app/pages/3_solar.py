@@ -47,7 +47,7 @@ st.markdown(f"""
 """)
 
 # ── Lecture formula display ───────────────────────────────────────────────────
-with st.expander("Fórmula de generación (Instrucciones de Tarea)", expanded=True):
+with st.expander("Fórmula implementada", expanded=True):
     st.markdown(r"""
     $$\text{Pow} \; [kW] = \text{POA} \; [W/m^2] \times \text{Área}_{panel} \; [m^2] \times \eta_{panel}$$
 
@@ -59,6 +59,9 @@ with st.expander("Fórmula de generación (Instrucciones de Tarea)", expanded=Tr
 
 # ── Date range and resolution ─────────────────────────────────────────────────
 st.divider()
+st.markdown(f""" **Elige el intérvalo de fechas** \\
+            Temporalmente solo permite fechas entre 2020 y 2025""")
+
 col_d1, col_d2, col_res = st.columns([2, 2, 1])
 start_dt = col_d1.date_input("Fecha inicio", value=datetime.date(2024, 1, 1),
                               min_value=datetime.date(2020, 1, 1),
@@ -67,7 +70,7 @@ end_dt = col_d2.date_input("Fecha fin", value=datetime.date(2024, 1, 31),
                              min_value=datetime.date(2020, 1, 1),
                              max_value=datetime.date(2025, 12, 31))
 resolution = col_res.radio("Resolución temporal", ["Horaria (1 h)", "Quinceminutal (15 min)"],
-                            index=0, help="Quinceminutal genera 4× más puntos — usa rangos cortos (<30 días)")
+                            index=1, help="Quinceminutal genera 4× más puntos, tomando 4 intérvalos cada hora.")
 
 freq = "15min" if "Quinceminutal" in resolution else "h"
 dt_h = 0.25 if freq == "15min" else 1.0
@@ -82,7 +85,7 @@ n_periods_expected = n_days * (96 if freq == "15min" else 24)
 if n_days > 366:
     st.warning("El rango máximo recomendado es 1 año.")
 if freq == "15min" and n_days > 31:
-    st.warning("Resolución quinceminutal con más de 31 días puede ser lenta. Considera usar rango mensual.")
+    st.warning("Resolución quinceminutal con más de 31 días puede ser lenta.")
 
 st.caption(f"Períodos esperados: **{n_periods_expected:,}** | N anual equivalente: **{'35,040' if freq=='15min' else '8,760'}**")
 

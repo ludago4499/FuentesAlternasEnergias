@@ -245,7 +245,7 @@ def align_solar(dem: pd.DataFrame, sol_df: pd.DataFrame) -> pd.Series:
     return s.reindex(dem.index, method="nearest",
                      tolerance=pd.Timedelta("65min")).fillna(0.0)
 
-allow_export = st.toggle("Permitir exportación (venta a red)", value=False)
+# allow_export = st.toggle("Permitir exportación (venta a red)", value=False)
 
 if df_irr is not None:
     solar_kw = align_solar(demand_df, df_irr)
