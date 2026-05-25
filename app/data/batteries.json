@@ -1,0 +1,72 @@
+[
+  {
+    "id": "byd_battery_box_h_10",
+    "brand": "BYD",
+    "model": "Battery-Box Premium HVS 10.2",
+    "kwh": 10.2,
+    "usable_kwh": 9.0,
+    "power_kw": 5.0,
+    "chemistry": "LiFePO4",
+    "cycles": 6000,
+    "dod_pct": 90,
+    "roundtrip_efficiency_pct": 96,
+    "usd_per_kwh": 350,
+    "warranty_years": 10
+  },
+  {
+    "id": "pylontech_force_h2_10",
+    "brand": "Pylontech",
+    "model": "FORCE-H2 10.65 kWh",
+    "kwh": 10.65,
+    "usable_kwh": 9.6,
+    "power_kw": 5.0,
+    "chemistry": "LiFePO4",
+    "cycles": 6000,
+    "dod_pct": 90,
+    "roundtrip_efficiency_pct": 95,
+    "usd_per_kwh": 330,
+    "warranty_years": 10
+  },
+  {
+    "id": "sungrow_sbr_hv_20",
+    "brand": "Sungrow",
+    "model": "SBR HV 19.2 kWh",
+    "kwh": 19.2,
+    "usable_kwh": 17.3,
+    "power_kw": 9.6,
+    "chemistry": "LiFePO4",
+    "cycles": 6000,
+    "dod_pct": 90,
+    "roundtrip_efficiency_pct": 95,
+    "usd_per_kwh": 310,
+    "warranty_years": 10
+  },
+  {
+    "id": "tesla_powerwall3",
+    "brand": "Tesla",
+    "model": "Powerwall 3",
+    "kwh": 13.5,
+    "usable_kwh": 13.5,
+    "power_kw": 11.5,
+    "chemistry": "NMC",
+    "cycles": 4000,
+    "dod_pct": 100,
+    "roundtrip_efficiency_pct": 97,
+    "usd_per_kwh": 510,
+    "warranty_years": 10
+  },
+  {
+    "id": "huawei_luna2000_15",
+    "brand": "Huawei",
+    "model": "LUNA2000-15-S0",
+    "kwh": 15.0,
+    "usable_kwh": 13.5,
+    "power_kw": 5.0,
+    "chemistry": "LiFePO4",
+    "cycles": 6000,
+    "dod_pct": 90,
+    "roundtrip_efficiency_pct": 95,
+    "usd_per_kwh": 320,
+    "warranty_years": 10
+  }
+]

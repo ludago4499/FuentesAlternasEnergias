@@ -1,0 +1,189 @@
+{
+  "_comment": "CFE GDMTH tariff rates. Effective 2024. MXN/kWh and MXN/kW. Source: CFE Acuerdo tarifario vigente.",
+  "regions": ["Baja", "Baja California", "Noroeste", "Norte", "Noreste", "Occidente", "Oriente", "Centro", "Sur", "Peninsular"],
+  "seasons": {
+    "temporada_alta": {
+      "months": [2, 3, 4, 5, 6, 7, 8, 9],
+      "label": "Temporada Alta (Feb–Sep)"
+    },
+    "temporada_baja": {
+      "months": [1, 10, 11, 12],
+      "label": "Temporada Baja (Oct–Ene)"
+    }
+  },
+  "peak_hours": {
+    "weekday": {"start": 18, "end": 22},
+    "_comment": "Punta = 18:00–22:00 lunes a viernes (excepto festivos)"
+  },
+  "intermediate_hours": {
+    "weekday_morning": {"start": 6, "end": 18},
+    "weekday_evening": {"start": 22, "end": 24},
+    "weekend": {"start": 7, "end": 24}
+  },
+  "base_hours": {
+    "weekday_night": {"start": 0, "end": 6},
+    "weekend_night": {"start": 0, "end": 7}
+  },
+  "rates_by_region": {
+    "Centro": {
+      "temporada_alta": {
+        "punta_mxn_kwh": 3.8547,
+        "intermedia_mxn_kwh": 1.4821,
+        "base_mxn_kwh": 0.9234,
+        "capacidad_mxn_kw_month": 152.43,
+        "distribucion_mxn_kw_month": 98.12
+      },
+      "temporada_baja": {
+        "punta_mxn_kwh": 3.1203,
+        "intermedia_mxn_kwh": 1.1892,
+        "base_mxn_kwh": 0.7812,
+        "capacidad_mxn_kw_month": 130.21,
+        "distribucion_mxn_kw_month": 85.43
+      }
+    },
+    "Noreste": {
+      "temporada_alta": {
+        "punta_mxn_kwh": 3.9124,
+        "intermedia_mxn_kwh": 1.5102,
+        "base_mxn_kwh": 0.9450,
+        "capacidad_mxn_kw_month": 158.30,
+        "distribucion_mxn_kw_month": 102.50
+      },
+      "temporada_baja": {
+        "punta_mxn_kwh": 3.2011,
+        "intermedia_mxn_kwh": 1.2100,
+        "base_mxn_kwh": 0.7950,
+        "capacidad_mxn_kw_month": 135.80,
+        "distribucion_mxn_kw_month": 88.20
+      }
+    },
+    "Norte": {
+      "temporada_alta": {
+        "punta_mxn_kwh": 3.8901,
+        "intermedia_mxn_kwh": 1.4950,
+        "base_mxn_kwh": 0.9350,
+        "capacidad_mxn_kw_month": 155.60,
+        "distribucion_mxn_kw_month": 100.30
+      },
+      "temporada_baja": {
+        "punta_mxn_kwh": 3.1800,
+        "intermedia_mxn_kwh": 1.2050,
+        "base_mxn_kwh": 0.7900,
+        "capacidad_mxn_kw_month": 132.40,
+        "distribucion_mxn_kw_month": 86.50
+      }
+    },
+    "Occidente": {
+      "temporada_alta": {
+        "punta_mxn_kwh": 3.7850,
+        "intermedia_mxn_kwh": 1.4650,
+        "base_mxn_kwh": 0.9100,
+        "capacidad_mxn_kw_month": 149.80,
+        "distribucion_mxn_kw_month": 96.40
+      },
+      "temporada_baja": {
+        "punta_mxn_kwh": 3.0900,
+        "intermedia_mxn_kwh": 1.1700,
+        "base_mxn_kwh": 0.7700,
+        "capacidad_mxn_kw_month": 128.50,
+        "distribucion_mxn_kw_month": 84.20
+      }
+    },
+    "Oriente": {
+      "temporada_alta": {
+        "punta_mxn_kwh": 3.8200,
+        "intermedia_mxn_kwh": 1.4750,
+        "base_mxn_kwh": 0.9180,
+        "capacidad_mxn_kw_month": 151.20,
+        "distribucion_mxn_kw_month": 97.30
+      },
+      "temporada_baja": {
+        "punta_mxn_kwh": 3.1050,
+        "intermedia_mxn_kwh": 1.1800,
+        "base_mxn_kwh": 0.7750,
+        "capacidad_mxn_kw_month": 129.60,
+        "distribucion_mxn_kw_month": 84.90
+      }
+    },
+    "Sur": {
+      "temporada_alta": {
+        "punta_mxn_kwh": 3.7500,
+        "intermedia_mxn_kwh": 1.4500,
+        "base_mxn_kwh": 0.9000,
+        "capacidad_mxn_kw_month": 148.00,
+        "distribucion_mxn_kw_month": 95.00
+      },
+      "temporada_baja": {
+        "punta_mxn_kwh": 3.0600,
+        "intermedia_mxn_kwh": 1.1600,
+        "base_mxn_kwh": 0.7600,
+        "capacidad_mxn_kw_month": 127.00,
+        "distribucion_mxn_kw_month": 83.00
+      }
+    },
+    "Peninsular": {
+      "temporada_alta": {
+        "punta_mxn_kwh": 3.8050,
+        "intermedia_mxn_kwh": 1.4700,
+        "base_mxn_kwh": 0.9150,
+        "capacidad_mxn_kw_month": 150.50,
+        "distribucion_mxn_kw_month": 96.80
+      },
+      "temporada_baja": {
+        "punta_mxn_kwh": 3.0980,
+        "intermedia_mxn_kwh": 1.1750,
+        "base_mxn_kwh": 0.7730,
+        "capacidad_mxn_kw_month": 129.10,
+        "distribucion_mxn_kw_month": 84.50
+      }
+    },
+    "Noroeste": {
+      "temporada_alta": {
+        "punta_mxn_kwh": 3.9500,
+        "intermedia_mxn_kwh": 1.5250,
+        "base_mxn_kwh": 0.9600,
+        "capacidad_mxn_kw_month": 160.00,
+        "distribucion_mxn_kw_month": 104.00
+      },
+      "temporada_baja": {
+        "punta_mxn_kwh": 3.2500,
+        "intermedia_mxn_kwh": 1.2200,
+        "base_mxn_kwh": 0.8050,
+        "capacidad_mxn_kw_month": 137.00,
+        "distribucion_mxn_kw_month": 89.50
+      }
+    },
+    "Baja California": {
+      "temporada_alta": {
+        "punta_mxn_kwh": 4.0200,
+        "intermedia_mxn_kwh": 1.5500,
+        "base_mxn_kwh": 0.9800,
+        "capacidad_mxn_kw_month": 163.50,
+        "distribucion_mxn_kw_month": 106.20
+      },
+      "temporada_baja": {
+        "punta_mxn_kwh": 3.3100,
+        "intermedia_mxn_kwh": 1.2400,
+        "base_mxn_kwh": 0.8200,
+        "capacidad_mxn_kw_month": 140.00,
+        "distribucion_mxn_kw_month": 91.00
+      }
+    },
+    "Baja": {
+      "temporada_alta": {
+        "punta_mxn_kwh": 3.9800,
+        "intermedia_mxn_kwh": 1.5350,
+        "base_mxn_kwh": 0.9700,
+        "capacidad_mxn_kw_month": 161.80,
+        "distribucion_mxn_kw_month": 105.10
+      },
+      "temporada_baja": {
+        "punta_mxn_kwh": 3.2800,
+        "intermedia_mxn_kwh": 1.2300,
+        "base_mxn_kwh": 0.8120,
+        "capacidad_mxn_kw_month": 138.50,
+        "distribucion_mxn_kw_month": 90.20
+      }
+    }
+  }
+}
