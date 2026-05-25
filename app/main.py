@@ -76,7 +76,7 @@ with st.sidebar:
     st.markdown("""
     <small style='color:gray;'>
     Modelo: Jensen isótropo (pvlib)<br>
-    DOI: <a href='https://doi.org/10.1016/j.softx.2022.101070' target='_blank'>10.1016/j.softx.2022.101070</a>
+    DOI: <a href='https://doi.org/10.1016/j.solener.2023.112092' target='_blank'>10.1016/j.solener.2023.112092</a>
     </small>
     """, unsafe_allow_html=True)
 
@@ -128,7 +128,7 @@ with col3:
     $$G_{POA} = G_b R_b + G_d \\frac{1+\\cos\\beta}{2} + G \\rho \\frac{1-\\cos\\beta}{2}$$
 
     Referencia: Jensen *et al.* (2022), SoftwareX.
-    DOI: [10.1016/j.softx.2022.101070](https://doi.org/10.1016/j.softx.2022.101070)
+    DOI: [10.1016/j.solener.2023.112092](https://doi.org/10.1016/j.solener.2023.112092)
     """)
 
 st.divider()

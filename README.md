@@ -106,8 +106,8 @@ donde:
 
 **Cielo claro:** Modelo Ineichen-Perez implementado en pvlib.
 
-**Referencia:** Jensen, A. R., Sánchez-González, A., Poulsen, P. B., Deline, C., & Holmgren, W. F. (2022). *pvlib python: A python package for modeling solar energy systems.* SoftwareX, 20, 101070.
-[DOI: 10.1016/j.softx.2022.101070](https://doi.org/10.1016/j.softx.2022.101070)
+**Referencia:** Jensen, A. R., Anderson, K. S., Holmgren, W. F., Mikofski, M. A., Hansen, C. W., Boeman, L. J., & Loonen, R. (2023). *pvlib iotools—Open-source Python functions for seamless access to solar irradiance data.* Solar Energy, 266, 112092.
+[DOI: 10.1016/j.solener.2023.112092](https://doi.org/10.1016/j.solener.2023.112092)
 
 ### Temperatura de celda
 

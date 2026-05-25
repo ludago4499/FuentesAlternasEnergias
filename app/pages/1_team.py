@@ -90,8 +90,9 @@ with st.expander("Sobre el modelo Jensen (isótropo difuso) — pvlib", expanded
 
     donde $R_b$ es el factor geométrico beam, $\\beta$ el ángulo de inclinación y $\\rho$ el albedo.
 
-    **Referencia:** Jensen, A. R., et al. (2022). *pvlib python: A python package for modeling solar energy systems.*
-    SoftwareX, 20, 101070. [DOI: 10.1016/j.softx.2022.101070](https://www.sciencedirect.com/science/article/pii/S0038092X23007260)
+    **Referencia:** Jensen, A. R., Anderson, K. S., Holmgren, W. F., Mikofski, M. A., Hansen, C. W., Boeman, L. J., & Loonen, R. (2023).
+    *pvlib iotools—Open-source Python functions for seamless access to solar irradiance data.*
+    Solar Energy, 266, 112092. [DOI: 10.1016/j.solener.2023.112092](https://doi.org/10.1016/j.solener.2023.112092)
 
     Se eligió este modelo por su robustez comprobada, integración nativa en pvlib, y comportamiento
     conservador en estimaciones de generación (adecuado para proyecciones financieras).

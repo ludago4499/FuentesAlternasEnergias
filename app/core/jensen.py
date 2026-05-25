@@ -1,7 +1,7 @@
 """
 Jensen (isotropic diffuse) irradiance model wrapper using pvlib.
-Reference: Jensen et al. (2022) pvlib python. SoftwareX.
-DOI: 10.1016/j.softx.2022.101070
+Reference: Jensen et al. (2023) pvlib iotools. Solar Energy, 266, 112092.
+DOI: 10.1016/j.solener.2023.112092
 
 Energy formula (per lecture):
     Pow [kW] = POA × AreaPanel × η_panel

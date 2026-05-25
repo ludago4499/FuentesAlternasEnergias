@@ -196,7 +196,7 @@ if run_btn or "irradiance_df" in st.session_state:
         - **Fórmula de energía:** $E = \\sum_{{i=1}}^{{N}} Pow_i \\times \\Delta t$
         - **Albedo:** 0.25 | **η inversor:** 96%
         - **Coordenadas:** {lat}°N, {lon}°E | Altitud: {altitude} msnm
-        - **Referencia:** Jensen et al. (2022). SoftwareX. [DOI:10.1016/j.softx.2022.101070](https://doi.org/10.1016/j.softx.2022.101070)
+        - **Referencia:** Jensen et al. (2023). Solar Energy, 266, 112092. [DOI:10.1016/j.solener.2023.112092](https://doi.org/10.1016/j.solener.2023.112092)
         """)
 else:
     st.info("Configura los parámetros y haz clic en **Ejecutar modelo Jensen** para calcular la generación solar.")
