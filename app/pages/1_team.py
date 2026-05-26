@@ -18,7 +18,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── HARDCODED TEAM DATA ──────────────────────────────────────────────────────
-TEAM_NUMBER = 1
+TEAM_NUMBER = 4
 
 MEMBERS = [
     {"name": "Luis Daniel González Alcocer", "student_id": "A01286903", "role": "Project Manager (PM)"},
@@ -30,13 +30,15 @@ MEMBERS = [
 ]
 
 ABSTRACT = (
-    "El proyecto evalúa la viabilidad económica de un sistema fotovoltaico para un cliente "
-    "industrial tarifado bajo GDMTH de CFE. Se utiliza el modelo de irradiancia isótropa (Jensen) "
-    "implementado en pvlib para calcular la irradiancia en el plano del panel (POA) a partir de "
-    "datos GHI, DNI y DHI. El análisis integra la generación estimada con la estructura tarifaria "
-    "GDMTH (cargos por energía en punta, intermedia y base, más demanda facturable) para cuantificar "
-    "el ahorro anual, calcular indicadores financieros (VPN, TIR, payback) y determinar la "
-    "rentabilidad del proyecto bajo distintos escenarios de inversión y degradación del sistema."
+    "Esta herramienta permite la simulación fotovoltaica de instalaciones industriales bajo la "
+    "tarifa GDMTH de CFE. La metodología implementada se basa en el modelo de Jensen para el "
+    "cálculo de la irradiancia en el plano del arreglo (POA), considerando las componentes "
+    "directa, difusa y reflejada. La aplicación permite dimensionar sistemas fotovoltaicos "
+    "optimizados, evaluando el impacto económico en los cargos por energía (base, intermedia y "
+    "punta), capacidad y distribución. Se incluye la justificación técnica de la selección de "
+    "paneles Canadian Solar de 580W (Tier 1, eficiencia 22.5%) y baterías de litio LFP de "
+    "5.12 kWh, así como el análisis comparativo entre la curva de carga original y la curva con "
+    "inyección solar."
 )
 
 ROLE_CSS = {
