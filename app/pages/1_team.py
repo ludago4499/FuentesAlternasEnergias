@@ -25,7 +25,7 @@ MEMBERS = [
     {"name": "Andrés Saul Pérez Martinez", "student_id": "A01199376", "role": "Ingeniero Solar"},
     {"name": "Regina Echavarría Torres", "student_id": "A00841096", "role": "Ingeniero Solar"},
     {"name": "María Alejandra Peiro Loera", "student_id": "A00841878", "role": "Economista"},
-    {"name": "Maximilien Tragarz Quintana", "student_id": "A01735557", "role": "Economista"},
+    {"name": "Maximilien Tragarz Quintana", "student_id": "A01735557", "role": "Científico de Datos"},
     {"name": "Giancarlo Calcáneo Cadenas", "student_id": "A01664374", "role": "Analista de Datos"},
 ]
 
