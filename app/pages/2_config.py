@@ -192,9 +192,11 @@ with st.expander("🗺️ Seleccionar ubicación en mapa (opcional)", expanded=F
             clicked_alt = _get_altitude(clicked_lat, clicked_lon)
 
         clicked_region = _infer_cfe_region(clicked_lat, clicked_lon)
-        # Solo asignar si la región inferida existe en el catálogo
         if clicked_region not in TARIFF["regions"]:
             clicked_region = TARIFF["regions"][0]
+
+        safe_lat = max(14.5, min(32.7, clicked_lat))
+        safe_lon = max(-118.4, min(-86.7, clicked_lon))
 
         st.success(
             f"📌 **{clicked_lat:.4f}° N**, **{clicked_lon:.4f}° E** — "
@@ -202,13 +204,13 @@ with st.expander("🗺️ Seleccionar ubicación en mapa (opcional)", expanded=F
             f"Región CFE: **{clicked_region}**"
         )
 
-        st.session_state["lat"]      = clicked_lat
-        st.session_state["lon"]      = clicked_lon
+        st.session_state["lat"]      = safe_lat
+        st.session_state["lon"]      = safe_lon
         st.session_state["altitude"] = clicked_alt
         st.session_state["city"]     = "Personalizada"
         st.session_state["region"]   = clicked_region
         st.rerun()
-
+    
 # ── PANEL SELECTION ───────────────────────────────────────────────────────────
 st.divider()
 st.markdown("## 🔆 Panel Fotovoltaico")
