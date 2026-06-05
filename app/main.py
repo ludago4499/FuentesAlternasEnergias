@@ -1,8 +1,6 @@
 """
 GDMTH Solar Analysis Tool — Main entry point
 Tecnológico de Monterrey
-
-Run: streamlit run app/main.py
 """
 
 import streamlit as st
@@ -11,125 +9,122 @@ st.set_page_config(
     page_title="GDMTH Solar Analyzer",
     page_icon="☀️",
     layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={
-        "Get Help": None,
-        "Report a bug": None,
-        "About": "Herramienta de análisis económico solar para tarifa GDMTH — Tec de Monterrey",
-    },
+    initial_sidebar_state="expanded"
 )
 
-# ── Global CSS ────────────────────────────────────────────────────────────────
+# ── Global CSS (Solo estético, no rompe la navegación de tus compañeros) ─────
 st.markdown("""
 <style>
-    /* Tec de Monterrey brand colors */
-    :root {
-        --tec-blue: #0039A6;
-        --solar-yellow: #FFB300;
-        --solar-orange: #F57C00;
+    /* Colores y tipografía */
+    h1 { color: #0039A6 !important; font-weight: 800 !important; }
+    h2, h3 { color: #F57C00 !important; }
+    
+    /* Cajas de texto resaltadas */
+    .highlight-box {
+        background-color: #f8f9fa;
+        border-left: 6px solid #0039A6;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        margin-bottom: 20px;
     }
-    /* Sidebar nav header */
-    [data-testid="stSidebarNav"] { padding-top: 1rem; }
-    /* Primary button overrides */
-    div.stButton > button[kind="primary"] {
-        background-color: #0039A6;
-        border-color: #0039A6;
-        color: white;
+    
+    /* Texto con degradado para subtítulos pro */
+    .gradient-text {
+        background: linear-gradient(90deg, #0039A6 0%, #FFB300 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 900;
+        font-size: 1.8em;
+        margin-top: 10px;
+        margin-bottom: 20px;
     }
-    div.stButton > button[kind="primary"]:hover {
-        background-color: #002580;
-        border-color: #002580;
-    }
-    /* Metric delta positive */
-    [data-testid="stMetricDelta"] { font-size: 0.85em; }
-    /* Page headings */
-    h1 { color: #0039A6 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-with st.sidebar:
+# ── 1. Banner Principal (Imagen de alto impacto) ─────────────────────────────
+# Usamos una imagen libre de derechos de Unsplash para darle un toque muy pro
+st.image("https://images.unsplash.com/photo-1508514177221-188b1cf16e9d?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80", use_container_width=True)
+
+# ── 2. Encabezado Hero ───────────────────────────────────────────────────────
+st.markdown("<h1 style='text-align: center; font-size: 3.5em; margin-top: 20px;'>☀️ Análisis Económico Solar GDMTH</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 1.3em; color: gray; margin-bottom: 30px;'>Tecnológico de Monterrey — Herramienta de Viabilidad para Tarifa Industrial CFE</p>", unsafe_allow_html=True)
+
+st.divider()
+
+# ── 3. Contenido Principal en Columnas Asimétricas ───────────────────────────
+col1, col2 = st.columns([1.5, 1]) # La primera columna es un poco más ancha
+
+with col1:
     st.markdown("""
-    <div style='text-align:center; padding: 10px 0;'>
-        <div style='background:#0039A6; border-radius:10px; padding:16px; margin-bottom:8px;'>
-            <span style='font-size:2.2em;'>☀️</span><br>
-            <span style='color:white; font-weight:700; font-size:1.1em;'>GDMTH Solar</span><br>
-            <span style='color:#FFB300; font-size:0.8em;'>Tec de Monterrey</span>
-        </div>
+    <div class="highlight-box">
+        <h3 style="color:#0039A6 !important; margin-top:0;">Bienvenido a la Herramienta</h3>
+        <p style="font-size: 1.1em;">Esta aplicación evalúa la viabilidad económica de un sistema fotovoltaico (FV) para clientes industriales tarifados bajo la tarifa <b>GDMTH</b> (Gran Demanda en Media Tensión Horaria) de CFE.</p>
+        <p style="font-size: 1.1em;">Utilizamos el <b>modelo de irradiancia isótropa de Jensen</b> para calcular la generación solar horaria, contrastándolo contra la estructura tarifaria vigente.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Barras visuales para darle estilo de Dashboard
+    st.markdown("#### ⚡ Capacidad del Motor de Análisis")
+    st.progress(100, text="Precisión Isótropa (Modelo Jensen pvlib)")
+    st.progress(100, text="Estructura Tarifaria (CFE GDMTH Actualizada)")
+
+with col2:
+    # Tarjeta tipo widget con colores institucionales
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #0039A6, #001f5c); padding: 30px; border-radius: 15px; text-align: center; color: white; box-shadow: 0 8px 16px rgba(0,0,0,0.2);">
+        <h2 style="color: #FFB300 !important; margin-bottom: 5px;">Equipo 4</h2>
+        <p style="font-size: 1.2em; opacity: 0.9;">Proyecto de Energía Solar</p>
+        <hr style="border-color: rgba(255,255,255,0.2);">
+        <h1 style="color: white !important; font-size: 3.5em; margin: 10px 0;">👈</h1>
+        <p style="margin-top: 10px; font-size: 1.1em;"><b>Utiliza el menú lateral izquierdo</b> para navegar entre las secciones de Configuración, Demanda y Análisis Económico.</p>
     </div>
     """, unsafe_allow_html=True)
 
-    # Config summary
-    if "system_kwp" in st.session_state:
-        st.markdown("#### Configuración actual")
-        st.markdown(f"""
-        | Parámetro | Valor |
-        |-----------|-------|
-        | Ciudad | {st.session_state.get('city', '—')} |
-        | Sistema | {st.session_state.get('system_kwp', 0):.1f} kWp |
-        | Paneles | {st.session_state.get('n_panels', 0)} |
-        | Región CFE | {st.session_state.get('region', '—')} |
-        | USD/MXN | {st.session_state.get('usd_mxn', 17.5):.2f} |
+st.divider()
+
+# ── 4. Sección de Detalles Técnicos ──────────────────────────────────────────
+st.markdown("<div class='gradient-text'>Características del Modelo</div>", unsafe_allow_html=True)
+
+col_a, col_b, col_c = st.columns(3)
+
+with col_a:
+    with st.container(border=True):
+        st.markdown("### 🕒 Horarios Punta")
+        st.markdown("""
+        **Zonas Centro, Sur, Peninsular:**
+        * **Verano:** L–V 20:00–22:00
+        * **Invierno:** L–V 18:00–22:00
+        * Sábados invernales: 19:00–21:00
+        * Domingos/Festivos: Sin Punta
         """)
 
+with col_b:
+    with st.container(border=True):
+        st.markdown("### 💰 Cargos GDMTH")
+        st.markdown("""
+        Desglose de factura mensual:
+        1. ⚡ **Energía** (Suma de Punta/Intermedia/Base)
+        2. 🏭 **Capacidad** (Máxima demanda en Punta)
+        3. 🔌 **Distribución** (Máxima demanda general)
+        """)
+
+with col_c:
+    with st.container(border=True):
+        st.markdown("### 🌞 Ecuación Jensen")
+        st.markdown("Cálculo de irradiancia POA:")
+        st.latex(r"G_{POA} = G_b R_b + G_d \frac{1+\cos\beta}{2} + G \rho \frac{1-\cos\beta}{2}")
+        st.markdown("<small style='color:gray;'>Ref: Jensen <i>et al.</i> (2022)</small>", unsafe_allow_html=True)
+
+# ── Sidebar Original (Se mantiene debajo de la navegación automática) ────────
+with st.sidebar:
     st.divider()
-    st.markdown("""
-    <small style='color:gray;'>
-    Modelo: Jensen isótropo (pvlib)<br>
-    DOI: <a href='https://doi.org/10.1016/j.solener.2023.112092' target='_blank'>10.1016/j.solener.2023.112092</a>
-    </small>
-    """, unsafe_allow_html=True)
-
-# ── Home / Welcome screen ──────────────────────────────────────────────────────
-st.markdown("<h1 style='color:#0039A6;font-weight:700'>Herramienta de Análisis Económico Solar GDMTH</h1>",
-            unsafe_allow_html=True)
-
-st.markdown("""
-**Bienvenido.** Esta herramienta evalúa la viabilidad económica de un sistema fotovoltaico (FV)
-para clientes industriales tarifados bajo la tarifa **GDMTH** (Gran Demanda en Media Tensión Horaria) de CFE.
-
-Utiliza el **modelo de irradiancia isótropa de Jensen** implementado en [pvlib](https://pvlib-python.readthedocs.io/)
-para calcular la generación solar horaria, y la estructura tarifaria GDMTH vigente para cuantificar los ahorros.
-""")
-
-st.divider()
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.markdown("""
-    #### Esquema de la página
-    1. **Equipo** — La información del equipo 4.
-    2. **Configuración** — Panel y ubicación
-    3. **Análisis Solar** — Modelo Jensen + pvlib
-    4. **Demanda** — Curva de carga real
-    5. **Economía** — Ahorros GDMTH + reporte PDF
-    """)
-
-with col2:
-    st.markdown("""
-    #### Tarifa GDMTH
-    La tarifa incluye tres cargos principales:
-    - **Energía** (Punta / Intermedia / Base)
-    - **Capacidad** (máx. demanda media Punta)
-    - **Distribución** (máx. demanda integrada)
-
-    **Horario Punta** (Regiones Central, Noreste, Noroeste, Norte, Peninsular, Sur):
-    - **Verano** (1er dom. abril → sáb. previo al último dom. octubre): L–V 20:00–22:00
-    - **Invierno** (último dom. octubre → sáb. previo al 1er dom. abril): L–V 18:00–22:00; Sáb 19:00–21:00
-    - Domingo y festivo: sin Punta
-    """)   
-
-with col3:
-    st.markdown("""
-    #### Modelo Jensen (pvlib)
-    El modelo isótropo calcula la irradiancia en el
-    plano del panel (POA) mediante:
-
-    $$G_{POA} = G_b R_b + G_d \\frac{1+\\cos\\beta}{2} + G \\rho \\frac{1-\\cos\\beta}{2}$$
-
-    Referencia: Jensen *et al.* (2022), SoftwareX.
-    DOI: [10.1016/j.solener.2023.112092](https://doi.org/10.1016/j.solener.2023.112092)
-    """)
-
-st.divider()
-st.info("Usa la barra de navegación izquierda para avanzar por las secciones.")
+    st.markdown("### ⚙️ Resumen de Configuración")
+    
+    col_s1, col_s2 = st.columns(2)
+    col_s1.metric("Ciudad", st.session_state.get('city', '—'))
+    col_s2.metric("Sistema (kWp)", f"{st.session_state.get('system_kwp', 0):.1f}")
+    
+    col_s3, col_s4 = st.columns(2)
+    col_s3.metric("Paneles", st.session_state.get('n_panels', 0))
+    col_s4.metric("Región CFE", st.session_state.get('region', '—'))

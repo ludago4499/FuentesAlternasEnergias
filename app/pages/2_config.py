@@ -2,8 +2,37 @@ import json
 from pathlib import Path
 
 import streamlit as st
+import requests
+import folium
+from streamlit_folium import st_folium
 
 st.set_page_config(page_title="Configuración — GDMTH Solar", page_icon="⚙️", layout="wide")
+
+# ── CSS MEJORADO (Banner y Tarjetas) ─────────────────────────────────────────
+st.markdown("""
+<style>
+    .config-banner {
+        background: linear-gradient(135deg, #0039A6 0%, #0055ff 100%);
+        padding: 2rem;
+        border-radius: 12px;
+        color: white;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .config-banner h1 {
+        color: white !important;
+        margin: 0;
+        font-weight: 800;
+        font-size: 2.5em;
+    }
+    .config-banner p {
+        font-size: 1.1em;
+        color: #E0E0E0;
+        margin-top: 5px;
+        margin-bottom: 0;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ── Load catalog data ─────────────────────────────────────────────────────────
 DATA = Path(__file__).parent.parent / "data"
@@ -58,7 +87,6 @@ TZ_MAP = {
     "Personalizada": "America/Mexico_City",
 }
 
-
 def _init():
     defaults = {
         "city": "Monterrey, NL",
@@ -70,9 +98,6 @@ def _init():
         "n_panels": 100,
         "tilt": 20.0,
         "azimuth": 0.0,
-        # "battery_id": BATTERIES[0]["id"],   # BATTERY — disabled for now
-        # "battery_kwh": BATTERIES[0]["kwh"],
-        # "use_battery": False,
         "region": "Noreste",
         "usd_mxn": 17.5,
         "panel_justification": "",
@@ -81,193 +106,175 @@ def _init():
         if k not in st.session_state:
             st.session_state[k] = v
 
-
 _init()
 
-st.markdown("<h1 style='color:#0039A6;font-weight:700'>Configuración del Sistema</h1>",
-            unsafe_allow_html=True)
+# ── ENCABEZADO ────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="config-banner">
+    <h1>⚙️ Configuración del Sistema</h1>
+    <p>Ajusta los parámetros geográficos y técnicos para la simulación fotovoltaica.</p>
+</div>
+""", unsafe_allow_html=True)
 
-# ── LOCATION ──────────────────────────────────────────────────────────────────
-st.markdown("## 📍 Ubicación")
-col_city, col_region = st.columns([2, 1])
-with col_city:
-    city = st.selectbox("Ciudad", list(CITIES.keys()),
-                        index=list(CITIES.keys()).index(st.session_state["city"])
-                        if st.session_state["city"] in CITIES else 0)
-with col_region:
-    region = st.selectbox("Región CFE (tarifa)", TARIFF["regions"],
-                          index=TARIFF["regions"].index(st.session_state["region"])
-                          if st.session_state["region"] in TARIFF["regions"] else 0)
 
-if city != "Personalizada":
-    lat_default, lon_default = CITIES[city]
-    tz_default = TZ_MAP.get(city, "America/Mexico_City")
-else:
-    lat_default = st.session_state["lat"]
-    lon_default = st.session_state["lon"]
-    tz_default = st.session_state["tz"]
+# ── LOCATION (Tarjeta 1) ──────────────────────────────────────────────────────
+with st.container(border=True):
+    st.markdown("<h3 style='color:#0039A6; margin-top:0;'>📍 1. Ubicación y Tarifa</h3>", unsafe_allow_html=True)
+    
+    col_city, col_region = st.columns([2, 1])
+    with col_city:
+        city = st.selectbox("Ciudad predefinida", list(CITIES.keys()),
+                            index=list(CITIES.keys()).index(st.session_state["city"])
+                            if st.session_state["city"] in CITIES else 0)
+    with col_region:
+        region = st.selectbox("Región CFE (tarifa)", TARIFF["regions"],
+                              index=TARIFF["regions"].index(st.session_state["region"])
+                              if st.session_state["region"] in TARIFF["regions"] else 0)
 
-col_lat, col_lon, col_alt = st.columns(3)
-lat = col_lat.number_input("Latitud (°N)", value=float(lat_default or st.session_state["lat"]),
-                            min_value=14.5, max_value=32.7, step=0.001, format="%.4f")
-lon = col_lon.number_input("Longitud (°E)", value=float(lon_default or st.session_state["lon"]),
-                            min_value=-118.4, max_value=-86.7, step=0.001, format="%.4f")
-alt = col_alt.number_input("Altitud (msnm)", value=st.session_state["altitude"],
-                            min_value=0.0, max_value=5000.0, step=10.0)
+    if city != "Personalizada":
+        lat_default, lon_default = CITIES[city]
+        tz_default = TZ_MAP.get(city, "America/Mexico_City")
+    else:
+        lat_default = st.session_state["lat"]
+        lon_default = st.session_state["lon"]
+        tz_default = st.session_state["tz"]
 
-# ── Mapa interactivo ────────────────────────────────────────── (MAX)
+    st.markdown("##### Coordenadas exactas")
+    col_lat, col_lon, col_alt = st.columns(3)
+    lat = col_lat.number_input("Latitud (°N)", value=float(lat_default or st.session_state["lat"]),
+                               min_value=14.5, max_value=32.7, step=0.001, format="%.4f")
+    lon = col_lon.number_input("Longitud (°E)", value=float(lon_default or st.session_state["lon"]),
+                               min_value=-118.4, max_value=-86.7, step=0.001, format="%.4f")
+    alt = col_alt.number_input("Altitud (msnm)", value=st.session_state["altitude"],
+                               min_value=0.0, max_value=5000.0, step=10.0)
 
-import requests
-import folium
-from streamlit_folium import st_folium
+    # Mapa interactivo dentro de un expander para no saturar la vista
+    def _get_altitude(lat: float, lon: float) -> float:
+        try:
+            url = f"https://api.open-meteo.com/v1/elevation?latitude={lat}&longitude={lon}"
+            r = requests.get(url, timeout=5)
+            r.raise_for_status()
+            return float(r.json()["elevation"][0])
+        except Exception:
+            return st.session_state.get("altitude", 540.0)
 
-def _get_altitude(lat: float, lon: float) -> float:
-    try:
-        url = f"https://api.open-meteo.com/v1/elevation?latitude={lat}&longitude={lon}"
-        r = requests.get(url, timeout=5)
-        r.raise_for_status()
-        return float(r.json()["elevation"][0])
-    except Exception:
-        return st.session_state.get("altitude", 540.0)
+    with st.expander("🗺️ Seleccionar ubicación en mapa interactivo", expanded=False):
+        st.info("👆 Haz **click** en cualquier punto del mapa para autorellenar la latitud, longitud y altitud.")
 
-with st.expander("🗺️ Seleccionar ubicación en mapa (opcional)", expanded=False):
-    st.caption("Haz **click** en el mapa para autorellenar latitud, longitud y altitud.")
-
-    m = folium.Map(
-        location=[lat, lon],   # usa los values que ya tienen los number_input
-        zoom_start=11,
-        tiles="CartoDB positron",
-    )
-    folium.Marker(
-        location=[lat, lon],
-        tooltip="Ubicación actual",
-        icon=folium.Icon(color="blue", icon="sun", prefix="fa"),
-    ).add_to(m)
-
-    map_data = st_folium(m, height=380, width="100%", returned_objects=["last_clicked"])
-
-    if map_data and map_data.get("last_clicked"):
-        clicked_lat = map_data["last_clicked"]["lat"]
-        clicked_lon = map_data["last_clicked"]["lng"]
-
-        with st.spinner("Obteniendo altitud..."):
-            clicked_alt = _get_altitude(clicked_lat, clicked_lon)
-
-        st.success(
-            f"📌 **{clicked_lat:.4f}° N**, **{clicked_lon:.4f}° E** — "
-            f"Altitud: **{clicked_alt:.0f} msnm**"
+        m = folium.Map(
+            location=[lat, lon],
+            zoom_start=11,
+            tiles="CartoDB positron",
         )
+        folium.Marker(
+            location=[lat, lon],
+            tooltip="Ubicación actual",
+            icon=folium.Icon(color="blue", icon="sun", prefix="fa"),
+        ).add_to(m)
 
-        st.session_state["lat"]      = clicked_lat
-        st.session_state["lon"]      = clicked_lon
-        st.session_state["altitude"] = clicked_alt
-        st.session_state["city"]     = "Personalizada"
-        st.rerun()
+        map_data = st_folium(m, height=380, width="100%", returned_objects=["last_clicked"])
 
-# ── PANEL SELECTION ───────────────────────────────────────────────────────────
-st.divider()
-st.markdown("## 🔆 Panel Fotovoltaico")
+        if map_data and map_data.get("last_clicked"):
+            clicked_lat = map_data["last_clicked"]["lat"]
+            clicked_lon = map_data["last_clicked"]["lng"]
 
-panel_ids = [p["id"] for p in PANELS]
-panel_labels = [f"{p['brand']} {p['model']} — {p['wp']}Wp | {p['efficiency_pct']}% | ${p['usd_per_w']}/W | Tier {p['tier']}"
-                for p in PANELS]
+            with st.spinner("Obteniendo altitud satelital..."):
+                clicked_alt = _get_altitude(clicked_lat, clicked_lon)
 
-current_panel_idx = panel_ids.index(st.session_state["panel_id"]) if st.session_state["panel_id"] in panel_ids else 0
-panel_idx = st.selectbox("Selecciona panel", range(len(PANELS)), format_func=lambda i: panel_labels[i],
-                          index=current_panel_idx)
-panel = PANELS[panel_idx]
+            st.success(f"📌 Ubicación actualizada: **{clicked_lat:.4f}° N**, **{clicked_lon:.4f}° E** — Altitud: **{clicked_alt:.0f} msnm**")
 
-col_p1, col_p2, col_p3 = st.columns(3)
-col_p1.metric("Potencia pico", f"{panel['wp']} Wp")
-col_p2.metric("Eficiencia", f"{panel['efficiency_pct']} %")
-col_p3.metric("Precio", f"${panel['usd_per_w']:.2f} USD/W")
+            st.session_state["lat"]      = clicked_lat
+            st.session_state["lon"]      = clicked_lon
+            st.session_state["altitude"] = clicked_alt
+            st.session_state["city"]     = "Personalizada"
+            st.rerun()
 
-col_p4, col_p5, col_p6 = st.columns(3)
-col_p4.metric("Voc", f"{panel['voc']} V")
-col_p5.metric("Isc", f"{panel['isc']} A")
-col_p6.metric("Garantía", f"{panel['warranty_years']} años")
+st.write("") # Espaciador
 
-# Physical dimensions — required for Pow = POA × AreaPanel × η
-w = panel.get("width_m", panel["wp"] / (1000 * panel["efficiency_pct"] / 100) ** 0.5)
-l = panel.get("length_m", panel["wp"] / (1000 * panel["efficiency_pct"] / 100) ** 0.5)
-area_m2 = panel.get("area_m2", panel["wp"] / (1000.0 * panel["efficiency_pct"] / 100.0))
-col_dim1, col_dim2, col_dim3 = st.columns(3)
-col_dim1.metric("Ancho del panel", f"{w:.3f} m")
-col_dim2.metric("Largo del panel", f"{l:.3f} m")
-col_dim3.metric("Área del panel (ancho × largo)", f"{area_m2:.3f} m²")
+# ── PANEL SELECTION (Tarjeta 2) ───────────────────────────────────────────────
+with st.container(border=True):
+    st.markdown("<h3 style='color:#F57C00; margin-top:0;'>🔆 2. Módulo Fotovoltaico</h3>", unsafe_allow_html=True)
 
-col_n, col_tilt, col_az = st.columns(3)
-n_panels = col_n.number_input("Número de paneles", min_value=1, max_value=5000,
-                               value=st.session_state["n_panels"], step=1)
-tilt = col_tilt.number_input("Ángulo de inclinación (°)", min_value=0.0, max_value=90.0,
-                               value=st.session_state["tilt"], step=0.5)
-azimuth = col_az.number_input("Azimut del panel (0=Sur, −=Este, +=Oeste)",
-                               min_value=-180.0, max_value=180.0,
-                               value=st.session_state["azimuth"], step=1.0)
-st.caption("Azimut: **0°** = Sur (óptimo México) | **−90°** = Este | **+90°** = Oeste | **±180°** = Norte")
+    panel_ids = [p["id"] for p in PANELS]
+    panel_labels = [f"{p['brand']} {p['model']} — {p['wp']}Wp | {p['efficiency_pct']}% | ${p['usd_per_w']}/W | Tier {p['tier']}"
+                    for p in PANELS]
 
-system_kwp = (n_panels * panel["wp"]) / 1000.0
-capex_usd = n_panels * panel["wp"] * panel["usd_per_w"]
+    current_panel_idx = panel_ids.index(st.session_state["panel_id"]) if st.session_state["panel_id"] in panel_ids else 0
+    panel_idx = st.selectbox("Selecciona un panel del catálogo", range(len(PANELS)), format_func=lambda i: panel_labels[i],
+                             index=current_panel_idx)
+    panel = PANELS[panel_idx]
 
-st.info(
-    f"**Tamaño del sistema:** {system_kwp:.2f} kWp  |  "
-    f"**CAPEX estimado paneles:** ${capex_usd:,.0f} USD"
-)
+    # Sub-tarjeta de especificaciones del panel
+    with st.container(border=True):
+        col_p1, col_p2, col_p3 = st.columns(3)
+        col_p1.metric("Potencia pico", f"{panel['wp']} Wp")
+        col_p2.metric("Eficiencia", f"{panel['efficiency_pct']} %")
+        col_p3.metric("Precio unitario", f"${panel['usd_per_w']:.2f} USD/W")
 
-justification = st.text_area(
-    "Justificación técnica de la selección de panel",
-    value=st.session_state.get("panel_justification") or (
-        f"Se seleccionó el panel {panel['brand']} {panel['model']} por su alta eficiencia "
-        f"de {panel['efficiency_pct']}%, certificación Tier {panel['tier']}, y garantía de "
-        f"{panel['warranty_years']} años. La tecnología monocristalina PERC ofrece mejor "
-        f"rendimiento en condiciones de irradiancia difusa, relevante para el sitio seleccionado."
-    ),
-    height=100,
-)
+        col_p4, col_p5, col_p6 = st.columns(3)
+        col_p4.metric("Voltaje (Voc)", f"{panel['voc']} V")
+        col_p5.metric("Corriente (Isc)", f"{panel['isc']} A")
+        col_p6.metric("Garantía", f"{panel['warranty_years']} años")
 
-# ── BATTERY SELECTION — disabled for now, uncomment to re-enable ──────────────
-# st.divider()
-# st.markdown("## 🔋 Sistema de Baterías (opcional)")
-#
-# use_battery = st.toggle("Incluir batería de almacenamiento", value=st.session_state.get("use_battery", False))
-#
-# if use_battery:
-#     bat_ids = [b["id"] for b in BATTERIES]
-#     bat_labels = [f"{b['brand']} {b['model']} — {b['kwh']} kWh | {b['cycles']} ciclos | ${b['usd_per_kwh']}/kWh"
-#                   for b in BATTERIES]
-#     cur_bat_idx = bat_ids.index(st.session_state["battery_id"]) if st.session_state.get("battery_id") in bat_ids else 0
-#     bat_idx = st.selectbox("Selecciona batería", range(len(BATTERIES)),
-#                             format_func=lambda i: bat_labels[i], index=cur_bat_idx)
-#     battery = BATTERIES[bat_idx]
-#     bat_kwh = st.slider("Capacidad instalada (kWh)", min_value=battery["kwh"],
-#                          max_value=battery["kwh"] * 10, value=st.session_state.get("battery_kwh", battery["kwh"]),
-#                          step=battery["kwh"])
-#     col_b1, col_b2, col_b3 = st.columns(3)
-#     col_b1.metric("Capacidad útil", f"{battery['usable_kwh']} kWh")
-#     col_b2.metric("Química", battery["chemistry"])
-#     col_b3.metric("Eficiencia RT", f"{battery['roundtrip_efficiency_pct']} %")
-#     bat_capex_usd = (bat_kwh / battery["kwh"]) * battery["kwh"] * battery["usd_per_kwh"]
-#     st.info(f"**CAPEX estimado baterías:** ${bat_capex_usd:,.0f} USD  |  "
-#             f"**Ciclos de vida:** {battery['cycles']:,}")
-# else:
-#     battery = None
-#     bat_kwh = 0.0
-#     bat_idx = 0
+    # Physical dimensions
+    st.markdown("##### Dimensiones Físicas y Arreglo")
+    w = panel.get("width_m", panel["wp"] / (1000 * panel["efficiency_pct"] / 100) ** 0.5)
+    l = panel.get("length_m", panel["wp"] / (1000 * panel["efficiency_pct"] / 100) ** 0.5)
+    area_m2 = panel.get("area_m2", panel["wp"] / (1000.0 * panel["efficiency_pct"] / 100.0))
+    
+    col_dim1, col_dim2, col_dim3 = st.columns(3)
+    col_dim1.metric("Ancho del panel", f"{w:.3f} m")
+    col_dim2.metric("Largo del panel", f"{l:.3f} m")
+    col_dim3.metric("Área por panel", f"{area_m2:.3f} m²")
+
+    st.write("---")
+    
+    col_n, col_tilt, col_az = st.columns(3)
+    n_panels = col_n.number_input("Número de paneles", min_value=1, max_value=5000,
+                                  value=st.session_state["n_panels"], step=1)
+    tilt = col_tilt.number_input("Ángulo de inclinación (°)", min_value=0.0, max_value=90.0,
+                                 value=st.session_state["tilt"], step=0.5)
+    azimuth = col_az.number_input("Azimut (0=Sur, −=Este, +=Oeste)",
+                                  min_value=-180.0, max_value=180.0,
+                                  value=st.session_state["azimuth"], step=1.0)
+    st.caption("💡 **Tip de Azimut:** **0°** = Sur (Óptimo para México) | **−90°** = Este | **+90°** = Oeste | **±180°** = Norte")
+
+    system_kwp = (n_panels * panel["wp"]) / 1000.0
+    capex_usd = n_panels * panel["wp"] * panel["usd_per_w"]
+
+    st.success(
+        f"**📊 Resumen del Arreglo:** Tamaño del sistema: **{system_kwp:.2f} kWp**  |  "
+        f"CAPEX estimado paneles: **${capex_usd:,.0f} USD**"
+    )
+
+    justification = st.text_area(
+        "Justificación técnica de la selección",
+        value=st.session_state.get("panel_justification") or (
+            f"Se seleccionó el panel {panel['brand']} {panel['model']} por su alta eficiencia "
+            f"de {panel['efficiency_pct']}%, certificación Tier {panel['tier']}, y garantía de "
+            f"{panel['warranty_years']} años. La tecnología monocristalina PERC ofrece mejor "
+            f"rendimiento en condiciones de irradiancia difusa, relevante para el sitio seleccionado."
+        ),
+        height=100,
+    )
 
 use_battery = False
 battery = None
 bat_kwh = 0.0
 bat_idx = 0
 
-# ── EXCHANGE RATE ─────────────────────────────────────────────────────────────
-st.divider()
-col_fx, _ = st.columns([1, 2])
-usd_mxn = col_fx.number_input("Tipo de cambio USD/MXN", min_value=10.0, max_value=30.0,
-                               value=st.session_state["usd_mxn"], step=0.1, format="%.2f")
+st.write("") # Espaciador
+
+# ── FINANZAS (Tarjeta 3) ──────────────────────────────────────────────────────
+with st.container(border=True):
+    st.markdown("<h3 style='color:#2E7D32; margin-top:0;'>💵 3. Parámetros Financieros</h3>", unsafe_allow_html=True)
+    col_fx, _ = st.columns([1, 2])
+    usd_mxn = col_fx.number_input("Tipo de cambio actual (USD/MXN)", min_value=10.0, max_value=30.0,
+                                  value=st.session_state["usd_mxn"], step=0.1, format="%.2f")
 
 # ── SAVE ──────────────────────────────────────────────────────────────────────
-st.divider()
-if st.button("Guardar configuración", type="primary", use_container_width=True):
+st.write("")
+if st.button("💾 Guardar configuración del sistema", type="primary", use_container_width=True):
     st.session_state.update({
         "city": city,
         "lat": lat,
@@ -281,13 +288,10 @@ if st.button("Guardar configuración", type="primary", use_container_width=True)
         "azimuth": azimuth,
         "system_kwp": system_kwp,
         "panel_capex_usd": capex_usd,
-        # "use_battery": use_battery,       # BATTERY — disabled for now
-        # "battery_id": ...,
-        # "battery": battery,
-        # "battery_kwh": bat_kwh,
         "region": region,
         "usd_mxn": usd_mxn,
         "panel_justification": justification,
     })
-    st.success("Configuración guardada. Puedes avanzar a la página de Análisis Solar.")
+    st.success("✅ ¡Configuración guardada exitosamente! Ya puedes avanzar al Análisis Solar o al Análisis de Demanda.")
     st.balloons()
+    
