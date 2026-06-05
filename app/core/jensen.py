@@ -15,7 +15,6 @@ import pvlib
 from pvlib.location import Location
 from pvlib import irradiance
 
-# Time-step in hours for each supported frequency
 FREQ_DT = {"15min": 0.25, "h": 1.0, "1h": 1.0}
 
 
@@ -23,12 +22,7 @@ def get_location(lat: float, lon: float, tz: str = "America/Monterrey", altitude
     return Location(latitude=lat, longitude=lon, tz=tz, altitude=altitude, name="Site")
 
 
-# ── Internal POA builder ──────────────────────────────────────────────────────
-
-def _build_poa_df(
-    ghi, dni, dhi, solar_pos: pd.DataFrame, tilt: float, azimuth: float, index
-) -> pd.DataFrame:
-    """Transpose GHI/DNI/DHI to plane-of-array using Jensen isotropic model."""
+def _build_poa_df(ghi, dni, dhi, solar_pos: pd.DataFrame, tilt: float, azimuth: float, index) -> pd.DataFrame:
     poa = irradiance.get_total_irradiance(
         surface_tilt=tilt,
         surface_azimuth=azimuth,
@@ -58,8 +52,6 @@ def _build_poa_df(
     return df.clip(lower=0)
 
 
-# ── Stochastic cloud model ────────────────────────────────────────────────────
-
 def _apply_ar1_cloud_model(
     clearsky_df: pd.DataFrame,
     solar_pos: pd.DataFrame,
@@ -71,24 +63,13 @@ def _apply_ar1_cloud_model(
     kt_max: float = 1.0,
     seed: int | None = None,
 ) -> pd.DataFrame:
-    """
-    Apply auto-correlated (AR-1) daily cloud variability to clear-sky irradiance.
-
-    Generates a daily clearness index kt ~ AR(1) with mean 0.65, broadcasts it
-    to all intra-day timesteps, then re-transposes to POA so all components are
-    physically consistent.
-
-    phi   : day-to-day autocorrelation (0.92 → realistic persistence)
-    sigma : innovation std-dev (0.10 → moderate variability)
-    """
     rng = np.random.default_rng(seed)
     n = len(clearsky_df)
 
     dates = sorted(set(clearsky_df.index.date))
     n_days = len(dates)
-    mu = 0.65  # long-run average kt for Mexican plateau
+    mu = 0.65
 
-    # ── Layer 1: day-level background (slow, persistent) ──────────────────────
     kt_daily = np.empty(n_days)
     kt_daily[0] = mu
     for i in range(1, n_days):
@@ -98,19 +79,15 @@ def _apply_ar1_cloud_model(
     date_to_kt = {d: k for d, k in zip(dates, kt_daily)}
     kt_background = np.array([date_to_kt[ts.date()] for ts in clearsky_df.index])
 
-    # ── Layer 2: intra-day fast AR(1) anomaly (clouds passing by) ────────────
-    # phi_fast controls cloud duration: 0.6 ≈ 1–2 step memory (realistic passing clouds)
     phi_fast = 0.55
     sigma_fast = 0.18
     anomaly = np.zeros(n)
     for i in range(1, n):
         anomaly[i] = phi_fast * anomaly[i - 1] + sigma_fast * rng.standard_normal()
 
-    # Only apply during daytime (suppress nighttime noise)
     daytime = (clearsky_df["zenith"].values < 87).astype(float)
     anomaly = anomaly * daytime
 
-    # Combined kt: day background + fast anomaly, clipped to valid range
     kt = np.clip(kt_background + anomaly, kt_min, kt_max)
 
     ghi_c = clearsky_df["ghi"].values * kt
@@ -121,8 +98,6 @@ def _apply_ar1_cloud_model(
     df["cloud_cover_kt"] = kt
     return df
 
-
-# ── NREL NSRDB fetch ──────────────────────────────────────────────────────────
 
 def fetch_nsrdb_data(
     lat: float,
@@ -136,14 +111,6 @@ def fetch_nsrdb_data(
     azimuth: float = 180.0,
     freq: str = "h",
 ) -> pd.DataFrame:
-    """
-    Fetch TMY solar data from NREL NSRDB (PSM4) via pvlib.iotools,
-    align it to the requested date range, and return a POA DataFrame
-    with the same schema as run_jensen_model().
-
-    Free API key: https://developer.nrel.gov/signup/
-    Uses PSM4 (pvlib >= 0.11) — the current NREL production model.
-    """
     try:
         from pvlib.iotools import get_nsrdb_psm4_tmy as _get_tmy
     except ImportError:
@@ -165,10 +132,8 @@ def fetch_nsrdb_data(
             f"Error al obtener datos NSRDB. Verifica API key, email y conexión.\n{exc}"
         ) from exc
 
-    # Normalize column names — PSM4 may return mixed case ('GHI', 'DNI', 'DHI')
     tmy_df.columns = [c.lower().replace(" ", "_") for c in tmy_df.columns]
 
-    # Ensure tz-aware index (PSM4 may return tz-naive LST)
     if tmy_df.index.tz is None:
         import pytz
         utc_offset = float(meta.get("Time Zone", meta.get("timezone", 0)))
@@ -176,31 +141,26 @@ def fetch_nsrdb_data(
         tmy_df.index = tmy_df.index.tz_localize(fixed_tz)
     tmy_df = tmy_df.tz_convert(tz)
 
-    # For 15-min target: upsample TMY to 15-min via linear interpolation
     if freq == "15min":
         tmy_df = tmy_df.resample("15min").interpolate("linear")
 
-    # Build lookup keyed by (month, day, hour[, minute])
     use_minute = freq == "15min"
     lookup: dict = {}
     for ts, row in tmy_df.iterrows():
         key = (ts.month, ts.day, ts.hour, ts.minute) if use_minute else (ts.month, ts.day, ts.hour)
         lookup[key] = row
 
-    # Build target date range
     end_exclusive = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     target_times = pd.date_range(
         start=start_date, end=end_exclusive, freq=freq, tz=tz, inclusive="left"
     )
 
-    # Align TMY rows to target timestamps
     rows = []
     for ts in target_times:
         key = (ts.month, ts.day, ts.hour, ts.minute) if use_minute else (ts.month, ts.day, ts.hour)
         if key in lookup:
             rows.append(lookup[key])
         else:
-            # Feb 29 fallback → Feb 28
             fallback = (ts.month, 28, ts.hour, ts.minute) if use_minute else (ts.month, 28, ts.hour)
             rows.append(lookup.get(fallback, pd.Series(0.0, index=tmy_df.columns)))
 
@@ -210,8 +170,8 @@ def fetch_nsrdb_data(
     dni = aligned.get("dni", pd.Series(0.0, index=target_times)).values
     dhi = aligned.get("dhi", pd.Series(0.0, index=target_times)).values
 
-    location = get_location(lat, lon, tz)
-    solar_pos = location.get_solarposition(target_times)
+    loc = get_location(lat, lon, tz)
+    solar_pos = loc.get_solarposition(target_times)
 
     df = _build_poa_df(ghi, dni, dhi, solar_pos, tilt, azimuth, target_times)
 
@@ -221,8 +181,6 @@ def fetch_nsrdb_data(
 
     return df
 
-
-# ── Main model entry point ────────────────────────────────────────────────────
 
 def run_jensen_model(
     lat: float,
@@ -234,8 +192,7 @@ def run_jensen_model(
     tz: str = "America/Monterrey",
     altitude: float = 500.0,
     freq: str = "h",
-    # ── Weather source (new optional params — defaults reproduce original behavior)
-    weather_source: str = "clearsky",       # "clearsky" | "stochastic" | "nsrdb"
+    weather_source: str = "clearsky",
     nsrdb_api_key: str | None = None,
     nsrdb_email: str | None = None,
     stochastic_seed: int | None = None,
@@ -247,28 +204,13 @@ def run_jensen_model(
     wiring_loss_frac: float = 0.015,
     return_clearsky_baseline: bool = False,
 ) -> "pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]":
-    """
-    Compute POA irradiance using pvlib's isotropic diffuse transposition.
-
-    weather_source:
-      "clearsky"   — Ineichen clear-sky (original behavior, no cloud effect)
-      "stochastic" — AR(1) cloud variability applied to the clear-sky baseline
-      "nsrdb"      — Real TMY from NREL NSRDB API (requires api_key + email)
-
-    return_clearsky_baseline=True → returns (df_actual, df_clearsky) so the
-    page can compute losses and show the comparison chart.
-
-    DataFrame columns: ghi, dni, dhi, poa_global, poa_direct, poa_diffuse,
-    poa_sky_diffuse, poa_ground_diffuse, zenith, azimuth_sun.
-    attrs['dt_h'], attrs['freq'], attrs['weather_source'] are always set.
-    """
-    location = get_location(lat, lon, tz, altitude)
+    loc = get_location(lat, lon, tz, altitude)
 
     end_exclusive = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     times = pd.date_range(start=start_date, end=end_exclusive, freq=freq, tz=tz, inclusive="left")
 
-    solar_pos = location.get_solarposition(times)
-    clearsky = location.get_clearsky(times, model="ineichen")
+    solar_pos = loc.get_solarposition(times)
+    clearsky = loc.get_clearsky(times, model="ineichen")
 
     df_clearsky = _build_poa_df(
         clearsky["ghi"], clearsky["dni"], clearsky["dhi"],
@@ -287,9 +229,7 @@ def run_jensen_model(
 
     elif weather_source == "nsrdb":
         if not nsrdb_api_key or not nsrdb_email:
-            raise ValueError(
-                "nsrdb_api_key y nsrdb_email son requeridos para weather_source='nsrdb'."
-            )
+            raise ValueError("nsrdb_api_key y nsrdb_email son requeridos para weather_source='nsrdb'.")
         df_actual = fetch_nsrdb_data(
             lat=lat, lon=lon, api_key=nsrdb_api_key, email=nsrdb_email,
             start_date=start_date, end_date=end_date,
@@ -313,8 +253,6 @@ def run_jensen_model(
     return df_actual
 
 
-# ── PV generation ─────────────────────────────────────────────────────────────
-
 def compute_pv_generation(
     irradiance_df: pd.DataFrame,
     system_kwp: float,
@@ -326,19 +264,6 @@ def compute_pv_generation(
     noct: float = 43.0,
     ambient_temp_c: float = 25.0,
 ) -> pd.Series:
-    """
-    Estimate AC power output (kW) per time-step using the lecture formula:
-
-        Pow [kW] = POA [W/m²] × AreaTotal [m²] × η_panel / 1000
-
-    with NOCT temperature derating and inverter efficiency (0.96).
-
-    To obtain energy: E [kWh] = Σ(Pow_i × dt_h)
-    where dt_h = irradiance_df.attrs.get('dt_h', 1.0)
-
-    panel_area_m2  : physical area of one panel (m²). If None, derived from Wp/η.
-    n_panels       : override number of panels (if None, derived from system_kwp/panel_wp).
-    """
     _n = n_panels if n_panels is not None else int((system_kwp * 1000) / panel_wp)
     if panel_area_m2 is not None and panel_area_m2 > 0:
         total_area_m2 = _n * panel_area_m2
@@ -347,7 +272,6 @@ def compute_pv_generation(
 
     poa = irradiance_df["poa_global"].copy()
 
-    # Use per-timestamp ambient temp if stored (NSRDB path provides this)
     if "ambient_temp_c" in irradiance_df.columns:
         t_amb = irradiance_df["ambient_temp_c"].values
     else:
@@ -360,8 +284,6 @@ def compute_pv_generation(
     p_ac_kw = (poa * total_area_m2 * (panel_efficiency / 100.0) * derate * 0.96) / 1000.0
     return p_ac_kw.clip(lower=0)
 
-
-# ── Losses breakdown ──────────────────────────────────────────────────────────
 
 def compute_losses_breakdown(
     df_actual: pd.DataFrame,
@@ -377,14 +299,6 @@ def compute_losses_breakdown(
     soiling_loss_frac: float = 0.02,
     wiring_loss_frac: float = 0.015,
 ) -> dict:
-    """
-    Compute staged energy-loss chain from clear-sky potential to final AC output.
-
-    Chain: clearsky → cloud loss → temp loss → soiling → wiring → inverter → AC
-
-    Returns a dict with per-stage kWh values, per-stage loss % (relative to
-    clearsky), system efficiency metrics, and POA P50/P90 statistics.
-    """
     dt_h = df_actual.attrs.get("dt_h", 1.0)
 
     _n = n_panels if n_panels is not None else int((system_kwp * 1000) / panel_wp)
@@ -400,15 +314,12 @@ def compute_losses_breakdown(
 
     eta = panel_efficiency / 100.0
 
-    # Stage 1 — Clear-sky potential (η only, no derating)
     p_cs = (df_clearsky["poa_global"] * total_area * eta / 1000.0).clip(lower=0)
     e_clearsky = float(p_cs.sum() * dt_h)
 
-    # Stage 2 — After cloud
     p_cloud = (df_actual["poa_global"] * total_area * eta / 1000.0).clip(lower=0)
     e_after_cloud = float(p_cloud.sum() * dt_h)
 
-    # Stage 3 — After temperature derating
     poa = df_actual["poa_global"]
     t_cell = t_amb + (noct - 20.0) * (poa / 800.0)
     derate = (1.0 + (temp_coeff_pmax / 100.0) * (t_cell - 25.0)).clip(lower=0.5)
@@ -417,14 +328,11 @@ def compute_losses_breakdown(
     p_temp = (p_cloud * derate).clip(lower=0)
     e_after_temp = float(p_temp.sum() * dt_h)
 
-    # Stage 4 — After soiling
     e_after_soiling = float((p_temp * (1.0 - soiling_loss_frac)).sum() * dt_h)
 
-    # Stage 5 — After wiring
     p_wiring = p_temp * (1.0 - soiling_loss_frac) * (1.0 - wiring_loss_frac)
     e_after_wiring = float(p_wiring.sum() * dt_h)
 
-    # Stage 6 — After inverter
     e_ac = float((p_wiring * 0.96).sum() * dt_h)
 
     ref = e_clearsky if e_clearsky > 0.0 else 1.0
@@ -464,18 +372,14 @@ def compute_losses_breakdown(
     }
 
 
-# ── Energy / capacity helpers ─────────────────────────────────────────────────
-
 def energy_kwh(power_kw: pd.Series, irradiance_df: pd.DataFrame | None = None,
                dt_h: float | None = None) -> float:
-    """E [kWh] = Σ(Pow_i × dt_h)."""
     _dt = dt_h or (irradiance_df.attrs.get("dt_h", 1.0) if irradiance_df is not None else 1.0)
     return float(power_kw.sum() * _dt)
 
 
 def capacity_factor(generation_kw: pd.Series, system_kwp: float,
                     irradiance_df: pd.DataFrame | None = None) -> float:
-    """CF = E_actual / (kWp × total_hours)."""
     n = len(generation_kw)
     if n == 0 or system_kwp == 0:
         return 0.0
@@ -485,6 +389,5 @@ def capacity_factor(generation_kw: pd.Series, system_kwp: float,
 
 
 def peak_sun_hours(irradiance_df: pd.DataFrame) -> float:
-    """PSH = Σ(GHI × dt_h) / 1000"""
     dt_h = irradiance_df.attrs.get("dt_h", 1.0)
     return float(irradiance_df["ghi"].sum() * dt_h / 1000.0)

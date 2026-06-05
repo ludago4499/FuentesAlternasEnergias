@@ -118,7 +118,7 @@ with st.expander("Fuente de datos meteorológicos", expanded=True):
     nsrdb_key = c_key.text_input(
         "NREL API Key", value="", type="password",
         disabled=(weather_source != "nsrdb"),
-        help="Obtén una llave gratuita en developer.nlr.gov/signup/",
+        help="Obtén una llave gratuita en developer.nrel.gov/signup/",
         placeholder="Ingresa tu API key…",
     )
     nsrdb_email = c_email.text_input(
@@ -167,12 +167,12 @@ with st.expander("Fuente de datos meteorológicos", expanded=True):
                 # Step 2 — NREL homepage (no auth needed)
                 if _internet_ok:
                     try:
-                        r2 = requests.get("https://developer.nlr.gov", timeout=8)
-                        _diag.append(f"✅ developer.nlr.gov: HTTP {r2.status_code}")
+                        r2 = requests.get("https://developer.nrel.gov", timeout=8)
+                        _diag.append(f"✅ developer.nrel.gov: HTTP {r2.status_code}")
                         _nrel_ok = True
                     except Exception as e:
-                        _diag.append(f"❌ developer.nlr.gov bloqueado ({type(e).__name__}). "
-                                     "Tu red (Tec/VPN/firewall) bloquea este dominio.")
+                        _diag.append(f"❌ developer.nrel.gov bloqueado ({type(e).__name__}). "
+                                     "Tu red (VPN/firewall) bloquea este dominio.")
                         _nrel_ok = False
                 else:
                     _nrel_ok = False
@@ -180,7 +180,7 @@ with st.expander("Fuente de datos meteorológicos", expanded=True):
                 # Step 3 — API key test (uses same endpoint pvlib calls internally)
                 if _nrel_ok:
                     _test_url = (
-                        "https://developer.nlr.gov/api/nsrdb/v2/solar/"
+                        "https://developer.nrel.gov/api/nsrdb/v2/solar/"
                         "nsrdb-GOES-tmy-v4-0-0-download.csv"
                         f"?api_key={nsrdb_key}&email={nsrdb_email}"
                         f"&names=tmy&wkt=POINT({lon:.4f}%20{lat:.4f})"
@@ -192,7 +192,7 @@ with st.expander("Fuente de datos meteorológicos", expanded=True):
                             _diag.append("✅ API key válida — datos NSRDB disponibles para este sitio")
                         elif r3.status_code == 403:
                             _diag.append("❌ HTTP 403 — API key inválida o no activada aún. "
-                                         "Revisa developer.nlr.gov → My Account")
+                                         "Revisa developer.nrel.gov → My Account")
                         elif r3.status_code == 429:
                             _diag.append("⚠️ HTTP 429 — Límite de solicitudes. Espera ~1 min.")
                         elif r3.status_code == 200:
@@ -214,18 +214,18 @@ with st.expander("Fuente de datos meteorológicos", expanded=True):
             if not _internet_ok:
                 st.info("Sin internet. Revisa tu conexión de red.")
             elif not _nrel_ok:
-                st.info("El dominio developer.nlr.gov está bloqueado desde esta red. "
-                        "Prueba en una red diferente (hotspot del celular, casa, etc.) "
+                st.info("El dominio developer.nrel.gov está bloqueado desde esta red. "
+                        "Prueba en una red diferente"
                         "o usa el modo **Variabilidad estocástica** como alternativa.")
 
-    with st.expander("Parámetros de pérdidas del sistema", expanded=False):
+with st.expander("Parámetros de pérdidas del sistema", expanded=False):
         lc1, lc2 = st.columns(2)
         soiling_pct = lc1.slider("Pérdida por suciedad / polvo (%)", 0.0, 10.0, 2.0, 0.5,
-                                  help="Suciedad acumulada sobre los paneles.")
+                                help="Suciedad acumulada sobre los paneles.")
         wiring_pct = lc2.slider("Pérdida por cableado DC (%)", 0.0, 5.0, 1.5, 0.5,
-                                 help="Resistencia del cableado entre paneles e inversor.")
+                                help="Resistencia del cableado entre paneles e inversor.")
 
-# ── Run model ─────────────────────────────────────────────────────────────────
+# ── Run model ──
 run_col, _ = st.columns([1, 3])
 _nsrdb_ready = weather_source != "nsrdb" or (bool(nsrdb_key) and bool(nsrdb_email))
 run_btn = run_col.button(
