@@ -265,8 +265,7 @@ with st.container(border=True):
         return s.reindex(dem.index, method="nearest",
                          tolerance=pd.Timedelta("65min")).fillna(0.0)
 
-    # Botón deslizable activado (estaba comentado en tu código original)
-    allow_export = st.toggle("Permitir exportación (venta a red) para el cálculo de demanda neta", value=False)
+allow_export = st.toggle("Permitir exportación (venta a red)", value=False)
 
     if df_irr is not None:
         solar_kw = align_solar(demand_df, df_irr)

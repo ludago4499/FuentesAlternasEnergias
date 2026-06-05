@@ -158,19 +158,57 @@ with st.container(border=True):
         except Exception:
             return st.session_state.get("altitude", 540.0)
 
-    with st.expander("🗺️ Seleccionar ubicación en mapa interactivo", expanded=False):
-        st.info("👆 Haz **click** en cualquier punto del mapa para autorellenar la latitud, longitud y altitud.")
+def _infer_cfe_region(lat: float, lon: float) -> str:
+    # Fuera de México → default seguro
+    if not (14.5 <= lat <= 32.7 and -118.4 <= lon <= -86.7):
+        return TARIFF["regions"][0]   # ← antes retornaba "Norte"/"Sureste"/"Centro" hardcoded
 
-        m = folium.Map(
-            location=[lat, lon],
-            zoom_start=11,
-            tiles="CartoDB positron",
-        )
-        folium.Marker(
-            location=[lat, lon],
-            tooltip="Ubicación actual",
-            icon=folium.Icon(color="blue", icon="sun", prefix="fa"),
-        ).add_to(m)
+    # Baja California (península)
+    if lon < -109.5:
+        if lat >= 28.0:
+            return "Baja California"
+        else:
+            return "Baja California Sur"
+
+    # Noroeste: Sonora, Sinaloa, Nayarit (norte)
+    if lon <= -105.0 and lat >= 21.0:
+        return "Noroeste"
+
+    # Norte: Chihuahua, Durango, Coahuila (interior seco)
+    if lat >= 26.0 and lon > -109.5:
+        return "Norte"
+
+    # Noreste: Nuevo León, Tamaulipas, parte de Coahuila
+    if lat >= 23.0 and lon >= -102.0:
+        return "Noreste"
+
+    # Peninsular: Yucatán, Campeche, Q. Roo
+    if lon >= -92.0 and lat <= 21.5:
+        return "Peninsular"
+
+    # Sureste: Chiapas, Tabasco, Veracruz sur
+    if lat <= 18.5 and lon >= -96.0:
+        return "Sureste"
+
+    # Sur: Oaxaca, Guerrero, Michoacán costa
+    if lat <= 20.0:
+        return "Sur"
+
+    return "Centro"
+
+with st.expander("🗺️ Seleccionar ubicación en mapa (opcional)", expanded=False):
+    st.caption("Haz **click** en el mapa para autorellenar latitud, longitud, altitud y región CFE.")
+
+    m = folium.Map(
+        location=[lat, lon],
+        zoom_start=11,
+        tiles="CartoDB positron",
+    )
+    folium.Marker(
+        location=[lat, lon],
+        tooltip="Ubicación actual",
+        icon=folium.Icon(color="blue", icon="sun", prefix="fa"),
+    ).add_to(m)
 
         map_data = st_folium(m, height=380, width="100%", returned_objects=["last_clicked"])
 
@@ -181,19 +219,29 @@ with st.container(border=True):
             with st.spinner("Obteniendo altitud satelital..."):
                 clicked_alt = _get_altitude(clicked_lat, clicked_lon)
 
-            st.success(f"📌 Ubicación actualizada: **{clicked_lat:.4f}° N**, **{clicked_lon:.4f}° E** — Altitud: **{clicked_alt:.0f} msnm**")
+        clicked_region = _infer_cfe_region(clicked_lat, clicked_lon)
+        if clicked_region not in TARIFF["regions"]:
+            clicked_region = TARIFF["regions"][0]
 
-            st.session_state["lat"]      = clicked_lat
-            st.session_state["lon"]      = clicked_lon
-            st.session_state["altitude"] = clicked_alt
-            st.session_state["city"]     = "Personalizada"
-            st.rerun()
+        safe_lat = max(14.5, min(32.7, clicked_lat))
+        safe_lon = max(-118.4, min(-86.7, clicked_lon))
 
-st.write("") # Espaciador
+        st.success(
+            f"📌 **{clicked_lat:.4f}° N**, **{clicked_lon:.4f}° E** — "
+            f"Altitud: **{clicked_alt:.0f} msnm** — "
+            f"Región CFE: **{clicked_region}**"
+        )
 
-# ── PANEL SELECTION (Tarjeta 2) ───────────────────────────────────────────────
-with st.container(border=True):
-    st.markdown("<h3 style='color:#F57C00; margin-top:0;'>🔆 2. Módulo Fotovoltaico</h3>", unsafe_allow_html=True)
+        st.session_state["lat"]      = safe_lat
+        st.session_state["lon"]      = safe_lon
+        st.session_state["altitude"] = clicked_alt
+        st.session_state["city"]     = "Personalizada"
+        st.session_state["region"]   = clicked_region
+        st.rerun()
+    
+# ── PANEL SELECTION ───────────────────────────────────────────────────────────
+st.divider()
+st.markdown("## 🔆 Panel Fotovoltaico")
 
     panel_ids = [p["id"] for p in PANELS]
     panel_labels = [f"{p['brand']} {p['model']} — {p['wp']}Wp | {p['efficiency_pct']}% | ${p['usd_per_w']}/W | Tier {p['tier']}"
