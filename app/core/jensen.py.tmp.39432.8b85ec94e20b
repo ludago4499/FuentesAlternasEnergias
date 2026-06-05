@@ -82,13 +82,11 @@ def _apply_ar1_cloud_model(
     sigma : innovation std-dev (0.10 → moderate variability)
     """
     rng = np.random.default_rng(seed)
-    n = len(clearsky_df)
 
     dates = sorted(set(clearsky_df.index.date))
     n_days = len(dates)
-    mu = 0.65  # long-run average kt for Mexican plateau
+    mu = 0.65  # typical long-run average kt for Mexican plateau
 
-    # ── Layer 1: day-level background (slow, persistent) ──────────────────────
     kt_daily = np.empty(n_days)
     kt_daily[0] = mu
     for i in range(1, n_days):
@@ -96,22 +94,7 @@ def _apply_ar1_cloud_model(
     kt_daily = np.clip(kt_daily, kt_min, kt_max)
 
     date_to_kt = {d: k for d, k in zip(dates, kt_daily)}
-    kt_background = np.array([date_to_kt[ts.date()] for ts in clearsky_df.index])
-
-    # ── Layer 2: intra-day fast AR(1) anomaly (clouds passing by) ────────────
-    # phi_fast controls cloud duration: 0.6 ≈ 1–2 step memory (realistic passing clouds)
-    phi_fast = 0.55
-    sigma_fast = 0.18
-    anomaly = np.zeros(n)
-    for i in range(1, n):
-        anomaly[i] = phi_fast * anomaly[i - 1] + sigma_fast * rng.standard_normal()
-
-    # Only apply during daytime (suppress nighttime noise)
-    daytime = (clearsky_df["zenith"].values < 87).astype(float)
-    anomaly = anomaly * daytime
-
-    # Combined kt: day background + fast anomaly, clipped to valid range
-    kt = np.clip(kt_background + anomaly, kt_min, kt_max)
+    kt = np.array([date_to_kt[ts.date()] for ts in clearsky_df.index])
 
     ghi_c = clearsky_df["ghi"].values * kt
     dni_c = clearsky_df["dni"].values * kt
