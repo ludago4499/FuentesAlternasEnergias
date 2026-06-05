@@ -130,11 +130,49 @@ def _get_altitude(lat: float, lon: float) -> float:
     except Exception:
         return st.session_state.get("altitude", 540.0)
 
+def _infer_cfe_region(lat: float, lon: float) -> str:
+    # Fuera de México → default seguro
+    if not (14.5 <= lat <= 32.7 and -118.4 <= lon <= -86.7):
+        return TARIFF["regions"][0]   # ← antes retornaba "Norte"/"Sureste"/"Centro" hardcoded
+
+    # Baja California (península)
+    if lon < -109.5:
+        if lat >= 28.0:
+            return "Baja California"
+        else:
+            return "Baja California Sur"
+
+    # Noroeste: Sonora, Sinaloa, Nayarit (norte)
+    if lon <= -105.0 and lat >= 21.0:
+        return "Noroeste"
+
+    # Norte: Chihuahua, Durango, Coahuila (interior seco)
+    if lat >= 26.0 and lon > -109.5:
+        return "Norte"
+
+    # Noreste: Nuevo León, Tamaulipas, parte de Coahuila
+    if lat >= 23.0 and lon >= -102.0:
+        return "Noreste"
+
+    # Peninsular: Yucatán, Campeche, Q. Roo
+    if lon >= -92.0 and lat <= 21.5:
+        return "Peninsular"
+
+    # Sureste: Chiapas, Tabasco, Veracruz sur
+    if lat <= 18.5 and lon >= -96.0:
+        return "Sureste"
+
+    # Sur: Oaxaca, Guerrero, Michoacán costa
+    if lat <= 20.0:
+        return "Sur"
+
+    return "Centro"
+
 with st.expander("🗺️ Seleccionar ubicación en mapa (opcional)", expanded=False):
-    st.caption("Haz **click** en el mapa para autorellenar latitud, longitud y altitud.")
+    st.caption("Haz **click** en el mapa para autorellenar latitud, longitud, altitud y región CFE.")
 
     m = folium.Map(
-        location=[lat, lon],   # usa los values que ya tienen los number_input
+        location=[lat, lon],
         zoom_start=11,
         tiles="CartoDB positron",
     )
@@ -153,15 +191,22 @@ with st.expander("🗺️ Seleccionar ubicación en mapa (opcional)", expanded=F
         with st.spinner("Obteniendo altitud..."):
             clicked_alt = _get_altitude(clicked_lat, clicked_lon)
 
+        clicked_region = _infer_cfe_region(clicked_lat, clicked_lon)
+        # Solo asignar si la región inferida existe en el catálogo
+        if clicked_region not in TARIFF["regions"]:
+            clicked_region = TARIFF["regions"][0]
+
         st.success(
             f"📌 **{clicked_lat:.4f}° N**, **{clicked_lon:.4f}° E** — "
-            f"Altitud: **{clicked_alt:.0f} msnm**"
+            f"Altitud: **{clicked_alt:.0f} msnm** — "
+            f"Región CFE: **{clicked_region}**"
         )
 
         st.session_state["lat"]      = clicked_lat
         st.session_state["lon"]      = clicked_lon
         st.session_state["altitude"] = clicked_alt
         st.session_state["city"]     = "Personalizada"
+        st.session_state["region"]   = clicked_region
         st.rerun()
 
 # ── PANEL SELECTION ───────────────────────────────────────────────────────────
