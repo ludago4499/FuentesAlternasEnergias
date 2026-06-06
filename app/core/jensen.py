@@ -8,6 +8,7 @@ Energy formula (per lecture):
     E_anual [kWh] = Σ(Pow_i × Δt)   where Δt = 15/60 h (quinceminutal) or 1 h (horario)
     N = 35,040 periodos quinceminutales/año  |  N = 8,760 periodos horarios/año
 """
+# Puto el que lo lea
 
 import numpy as np
 import pandas as pd
