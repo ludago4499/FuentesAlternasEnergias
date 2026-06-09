@@ -65,10 +65,22 @@ demand_df = st.session_state.get("demand_df")
 solar_kw = st.session_state.get("solar_aligned")
 net_demand = st.session_state.get("net_demand")
 
+# ── Battery (from the Baterías page, if configured) ───────────────────────────
+use_battery = st.session_state.get("use_battery", False)
+battery_cfg = st.session_state.get("battery_cfg")
+battery_unit = st.session_state.get("battery", {})
+battery_units = st.session_state.get("battery_units", 0)
+bat_capex_usd = st.session_state.get("battery_capex_usd", 0.0) if (use_battery and battery_cfg) else 0.0
+
 # ── Sidebar settings ──────────────────────────────────────────────────────────
 st.sidebar.markdown("### ⚙️ Parámetros Financieros")
-# bat_capex_usd = st.sidebar.number_input(...)  # BATTERY — disabled for now
-bat_capex_usd = 0.0
+if use_battery and battery_cfg:
+    st.sidebar.success(
+        f"🔋 Batería activa: {battery_units} × {battery_unit.get('brand','')} "
+        f"{battery_unit.get('model','')} ({battery_cfg['capacity_kwh']:,.0f} kWh)"
+    )
+else:
+    st.sidebar.info("🔋 Sin batería. Configúrala en la página **Baterías** para incluirla aquí.")
 install_factor = st.sidebar.slider("Factor de instalación (% sobre equipos)", 10, 40, 20, help="Cubre estructura, cableado, inversores y mano de obra.")
 opex_pct = st.sidebar.slider("OPEX anual (% del CAPEX total)", 1, 5, 2, help="Mantenimiento, limpieza de paneles y seguros.")
 inflation_pct = st.sidebar.slider("Inflación tarifaria CFE anual (%)", 0.0, 15.0, 5.0, step=0.5)
@@ -80,11 +92,11 @@ total_capex_mxn = total_capex_usd * usd_mxn
 
 with st.container(border=True):
     st.markdown("<h3 class='section-title'>💳 Inversión Inicial (CAPEX)</h3>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Paneles FV", f"${panel_capex_usd:,.0f} USD")
-    # c2.metric("Baterías", ...)  # BATTERY — disabled for now
-    c2.metric("CAPEX total (c/instalación)", f"${total_capex_usd:,.0f} USD")
-    c3.metric("CAPEX total (MXN)", f"${total_capex_mxn:,.0f} MXN", help=f"TDC: {usd_mxn} MXN/USD")
+    c2.metric("Baterías", f"${bat_capex_usd:,.0f} USD")
+    c3.metric("CAPEX total (c/instalación)", f"${total_capex_usd:,.0f} USD")
+    c4.metric("CAPEX total (MXN)", f"${total_capex_mxn:,.0f} MXN", help=f"TDC: {usd_mxn} MXN/USD")
 
 # ── Cálculo Inicial ───────────────────────────────────────────────────────────
 if demand_df is None:
@@ -100,6 +112,12 @@ if solar_kw is not None:
 else:
     solar_series = pd.Series(0.0, index=demand_series.index)
 
+# If a battery is configured, dispatch it to obtain the post-storage grid demand
+battery_net = None
+if use_battery and battery_cfg:
+    from core.battery import dispatch_net
+    battery_net = dispatch_net(demand_df, solar_series, battery_cfg)
+
 monthly_results = []
 months_available = demand_series.groupby(demand_series.index.month).groups.keys()
 
@@ -107,7 +125,8 @@ for month_num in sorted(months_available):
     mask = demand_series.index.month == month_num
     d_month = demand_series[mask]
     s_month = solar_series[mask] if mask.any() else pd.Series(0.0, index=d_month.index)
-    result = calc.compute_bill(d_month, solar_kw=s_month)
+    final_net = battery_net[mask] if battery_net is not None else None
+    result = calc.compute_bill(d_month, solar_kw=s_month, final_net_kw=final_net)
     if result:
         monthly_results.append(result)
 

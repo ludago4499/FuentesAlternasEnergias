@@ -106,6 +106,7 @@ class GDMTHCalculator:
         demand_kw: pd.Series,
         solar_kw: pd.Series | None = None,
         trailing_12_punta_means: list[float] | None = None,
+        final_net_kw: pd.Series | None = None,
     ) -> dict:
         """
         Compute one billing month's GDMTH charges.
@@ -116,6 +117,10 @@ class GDMTHCalculator:
         solar_kw  : hourly solar generation (kW). If provided, net = demand - solar
         trailing_12_punta_means : list of previous months' mean Punta demands (kW)
             for Cargo por Capacidad. If None, uses current month only.
+        final_net_kw : final grid demand (kW) after additional dispatch such as a
+            battery shifting load between periods. When provided it is used as the
+            net demand directly (solar is still tracked separately for the
+            generation metrics). Overrides the demand − solar calculation.
 
         Returns dict with energy charges, capacity charge, distribution charge,
         subtotals, and all intermediate values.
@@ -127,6 +132,14 @@ class GDMTHCalculator:
         if solar_kw is not None:
             aligned = solar_kw.reindex(df.index, fill_value=0.0)
             df["solar"] = aligned.values
+
+        if final_net_kw is not None:
+            # Caller supplies the post-storage grid demand directly (e.g. after a
+            # battery dispatch shifts load from Punta to Base). Solar generation is
+            # still tracked separately below for the generation metrics.
+            net = final_net_kw.reindex(df.index, fill_value=0.0)
+            df["net_demand"] = net.clip(lower=0).values
+        elif solar_kw is not None:
             df["net_demand"] = (df["demand"] - df["solar"]).clip(lower=0)
         else:
             df["net_demand"] = df["demand"]

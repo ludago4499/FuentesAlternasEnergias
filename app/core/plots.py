@@ -220,6 +220,161 @@ def monthly_savings_bar(monthly_results: list[dict]) -> go.Figure:
     return fig
 
 
+def battery_dispatch_plot(
+    demand_kw: pd.Series,
+    solar_kw: pd.Series,
+    net_solar_kw: pd.Series,
+    net_batt_kw: pd.Series,
+    soc_kwh: pd.Series,
+    capacity_kwh: float,
+    threshold_kw: float | None = None,
+    discharge_hours: tuple[int, ...] | None = None,
+) -> go.Figure:
+    """
+    Battery dispatch view: original demand, net demand with solar only, and net
+    demand after the battery shaves the peak — plus the state of charge on a
+    secondary axis. The discharge window is shaded and, if a threshold (umbral)
+    is given, drawn as a horizontal target line.
+    """
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    fig.add_trace(go.Scatter(
+        x=demand_kw.index, y=demand_kw.values, name="Demanda original",
+        line=dict(color=RED, width=1.6),
+        hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Demanda: %{y:.1f} kW<extra></extra>",
+    ), secondary_y=False)
+
+    fig.add_trace(go.Scatter(
+        x=net_solar_kw.index, y=net_solar_kw.values, name="Neta sólo FV",
+        line=dict(color=SOLAR_ORANGE, width=1.4, dash="dot"),
+        hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Neta FV: %{y:.1f} kW<extra></extra>",
+    ), secondary_y=False)
+
+    fig.add_trace(go.Scatter(
+        x=net_batt_kw.index, y=net_batt_kw.values, name="Neta FV + Batería",
+        line=dict(color=TEC_BLUE, width=2.4),
+        fill="tozeroy", fillcolor="rgba(0,57,166,0.10)",
+        hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Neta+Bat: %{y:.1f} kW<extra></extra>",
+    ), secondary_y=False)
+
+    if capacity_kwh > 0:
+        soc_pct = (soc_kwh.values / capacity_kwh) * 100.0
+    else:
+        soc_pct = soc_kwh.values * 0.0
+    fig.add_trace(go.Scatter(
+        x=soc_kwh.index, y=soc_pct, name="Estado de carga (SoC)",
+        line=dict(color=GREEN, width=1.4),
+        hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>SoC: %{y:.0f} %<extra></extra>",
+    ), secondary_y=True)
+
+    # Shade the chosen discharge window (default Punta 18–22h)
+    if discharge_hours:
+        h0, h1 = min(discharge_hours), max(discharge_hours) + 1
+        win_label = f"Ventana baterías ({h0:02d}–{h1:02d}h)"
+    else:
+        h0, h1, win_label = 18, 22, "Punta"
+    if not demand_kw.empty:
+        dates = pd.Series(demand_kw.index.date).unique()
+        for d in dates[:7]:
+            fig.add_vrect(
+                x0=pd.Timestamp(d) + pd.Timedelta(hours=int(h0)),
+                x1=pd.Timestamp(d) + pd.Timedelta(hours=int(h1)),
+                fillcolor="rgba(197,57,41,0.07)", line_width=0,
+                annotation_text=win_label if d == dates[0] else "",
+                annotation_position="top left",
+            )
+
+    if threshold_kw is not None:
+        fig.add_hline(
+            y=threshold_kw, line_dash="dash", line_color=GREEN, line_width=2,
+            annotation_text=f"Umbral {threshold_kw:.0f} kW", annotation_position="bottom right",
+            secondary_y=False,
+        )
+
+    fig.update_layout(
+        template="plotly_white",
+        height=440,
+        xaxis_title="Tiempo",
+        legend=dict(orientation="h", y=-0.18),
+        hovermode="x unified",
+        margin=dict(t=20, b=70),
+    )
+    fig.update_yaxes(title_text="Potencia (kW)", secondary_y=False)
+    fig.update_yaxes(title_text="SoC (%)", secondary_y=True, range=[0, 105], showgrid=False)
+    return fig
+
+
+def battery_cost_comparison_bar(
+    monthly_no_batt: list[dict],
+    monthly_batt: list[dict],
+) -> go.Figure:
+    """
+    Monthly energy-cost ('gasto') comparison across three scenarios:
+    bill without FV, with FV only, and with FV + battery.
+    """
+    month_labels = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+                    "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    labels = [month_labels[r["month"] - 1] for r in monthly_no_batt]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(name="Sin FV", x=labels,
+                         y=[r["orig_total_mxn"] for r in monthly_no_batt],
+                         marker_color=RED))
+    fig.add_trace(go.Bar(name="Con FV", x=labels,
+                         y=[r["total_mxn"] for r in monthly_no_batt],
+                         marker_color=SOLAR_ORANGE))
+    fig.add_trace(go.Bar(name="Con FV + Batería", x=labels,
+                         y=[r["total_mxn"] for r in monthly_batt],
+                         marker_color=TEC_BLUE))
+
+    fig.update_layout(
+        barmode="group",
+        template="plotly_white",
+        yaxis_title="Gasto de energía (MXN / mes)",
+        height=380,
+        legend=dict(orientation="h", y=-0.18),
+        margin=dict(t=10, b=60),
+        hovermode="x unified",
+    )
+    return fig
+
+
+def battery_optimization_plot(rows: list[dict], best_units: int) -> go.Figure:
+    """
+    Optimization sweep: incremental annual saving (bars) and battery NPV (line)
+    versus the number of installed units, marking the optimal arrangement.
+    """
+    units = [r["units"] for r in rows]
+    incr = [r["incr_savings_mxn"] for r in rows]
+    npv = [r["npv_mxn"] for r in rows]
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_trace(go.Bar(
+        x=units, y=incr, name="Ahorro anual extra (MXN)",
+        marker_color=SOLAR_YELLOW, marker_line_color=SOLAR_ORANGE, marker_line_width=1,
+    ), secondary_y=False)
+    fig.add_trace(go.Scatter(
+        x=units, y=npv, name="VPN de la batería (MXN)",
+        line=dict(color=TEC_BLUE, width=3), mode="lines+markers",
+    ), secondary_y=True)
+
+    fig.add_vline(x=best_units, line_dash="dash", line_color=GREEN,
+                  annotation_text=f"Óptimo: {best_units} u.", annotation_position="top")
+    fig.add_hline(y=0, line_dash="dot", line_color="gray", secondary_y=True)
+
+    fig.update_layout(
+        template="plotly_white",
+        height=400,
+        xaxis_title="Número de baterías instaladas",
+        legend=dict(orientation="h", y=-0.18),
+        margin=dict(t=20, b=60),
+        hovermode="x unified",
+    )
+    fig.update_yaxes(title_text="Ahorro anual extra (MXN)", secondary_y=False)
+    fig.update_yaxes(title_text="VPN batería (MXN)", secondary_y=True, showgrid=False)
+    return fig
+
+
 def poa_heatmap(df: pd.DataFrame) -> go.Figure:
     """Heatmap of daily hourly POA irradiance."""
     df2 = df.copy()
