@@ -26,7 +26,8 @@ echo "Starting Streamlit app..."
 streamlit run "$SCRIPT_DIR/app/main.py" \
     --server.port 8501 \
     --server.headless false \
-    --theme.primaryColor "#0039A6" \
-    --theme.backgroundColor "#FFFFFF" \
-    --theme.secondaryBackgroundColor "#F0F4FF" \
-    --theme.textColor "#1A1A2E"
+    --theme.base "light" \
+    --theme.primaryColor "#FFD400" \
+    --theme.backgroundColor "#F5F0E1" \
+    --theme.secondaryBackgroundColor "#FAF6EB" \
+    --theme.textColor "#15151A"

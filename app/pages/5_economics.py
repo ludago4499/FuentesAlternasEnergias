@@ -32,15 +32,15 @@ from core.resilience import continuity_cashflows
 from core.plots import continuity_cashflow_bar
 from core.exporting import chart_with_export
 from core.state import keep_state
+from utils.theming import inject_theme, custom_metric
 
 st.set_page_config(page_title="Continuidad de Negocio — ROI", page_icon="📈", layout="wide")
 keep_state()
 
+inject_theme("05")
 # ── Estilos ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    h1 { color: #0039A6 !important; font-weight: 800 !important; }
-    h3, h4 { color: #0039A6 !important; }
     .cont-banner {
         background: linear-gradient(135deg, #0039A6 0%, #C62828 100%);
         padding: 1.6rem 2rem; border-radius: 12px; color: white;
@@ -220,15 +220,15 @@ st.markdown(
 st.markdown("#### 🎯 ROI basado en pérdidas evitadas (costo de la inacción)")
 with st.container(border=True):
     r1, r2, r3 = st.columns(3)
-    r1.metric("ROI — sólo respaldo (sin paneles)",
+    custom_metric(r1, "ROI — sólo respaldo (sin paneles)",
               f"{roi_sin:,.0f} %" if roi_sin == roi_sin else "—",
               help="Retorno de invertir SÓLO en baterías, justificado únicamente por las "
                    "reparaciones por apagones que se evitan.")
-    r2.metric("Payback — sin paneles",
+    custom_metric(r2, "Payback — sin paneles",
               f"{cf_sin['payback_years']:.1f} años"
               if cf_sin["payback_years"] < 100 else "∞",
               help="CAPEX batería / costo anual de apagones evitado.")
-    r3.metric("VPN — sin paneles", f"$ {cf_sin['npv_mxn']:,.0f} MXN",
+    custom_metric(r3, "VPN — sin paneles", f"$ {cf_sin['npv_mxn']:,.0f} MXN",
               delta="Rentable" if cf_sin["npv_mxn"] > 0 else "No rentable",
               delta_color="normal" if cf_sin["npv_mxn"] > 0 else "inverse")
     st.caption(
@@ -242,13 +242,13 @@ if fv_capex > 0 or ahorro_fv > 0:
     st.markdown("#### ☀️ ROI integral (respaldo + paneles)")
     with st.container(border=True):
         rc1, rc2, rc3 = st.columns(3)
-        rc1.metric("ROI — con paneles",
+        custom_metric(rc1, "ROI — con paneles",
                    f"{roi_con:,.0f} %" if roi_con == roi_con else "—",
                    help="Retorno de baterías + FV: pérdidas evitadas + ahorro tarifario.")
-        rc2.metric("Payback — con paneles",
+        custom_metric(rc2, "Payback — con paneles",
                    f"{cf_con['payback_years']:.1f} años"
                    if cf_con["payback_years"] < 100 else "∞")
-        rc3.metric("VPN — con paneles", f"$ {cf_con['npv_mxn']:,.0f} MXN",
+        custom_metric(rc3, "VPN — con paneles", f"$ {cf_con['npv_mxn']:,.0f} MXN",
                    delta="Rentable" if cf_con["npv_mxn"] > 0 else "No rentable",
                    delta_color="normal" if cf_con["npv_mxn"] > 0 else "inverse")
 

@@ -10,9 +10,11 @@ st.set_page_config(page_title="Configuración — GDMTH Solar", page_icon="⚙�
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.state import keep_state
+from utils.theming import inject_theme, custom_metric
 
 keep_state()
 
+inject_theme("02")
 # ── Load catalog data ─────────────────────────────────────────────────────────
 DATA = Path(__file__).parent.parent / "data"
 
@@ -289,23 +291,23 @@ panel_idx = st.selectbox("Selecciona panel", range(len(PANELS)), format_func=lam
 panel = PANELS[panel_idx]
 
 col_p1, col_p2, col_p3 = st.columns(3)
-col_p1.metric("Potencia pico", f"{panel['wp']} Wp")
-col_p2.metric("Eficiencia", f"{panel['efficiency_pct']} %")
-col_p3.metric("Precio", f"${panel['usd_per_w']:.2f} USD/W")
+custom_metric(col_p1, "Potencia pico", f"{panel['wp']} Wp")
+custom_metric(col_p2, "Eficiencia", f"{panel['efficiency_pct']} %")
+custom_metric(col_p3, "Precio", f"${panel['usd_per_w']:.2f} USD/W")
 
 col_p4, col_p5, col_p6 = st.columns(3)
-col_p4.metric("Voc", f"{panel['voc']} V")
-col_p5.metric("Isc", f"{panel['isc']} A")
-col_p6.metric("Garantía", f"{panel['warranty_years']} años")
+custom_metric(col_p4, "Voc", f"{panel['voc']} V")
+custom_metric(col_p5, "Isc", f"{panel['isc']} A")
+custom_metric(col_p6, "Garantía", f"{panel['warranty_years']} años")
 
 # Physical dimensions — required for Pow = POA × AreaPanel × η
 w = panel.get("width_m", panel["wp"] / (1000 * panel["efficiency_pct"] / 100) ** 0.5)
 l = panel.get("length_m", panel["wp"] / (1000 * panel["efficiency_pct"] / 100) ** 0.5)
 area_m2 = panel.get("area_m2", panel["wp"] / (1000.0 * panel["efficiency_pct"] / 100.0))
 col_dim1, col_dim2, col_dim3 = st.columns(3)
-col_dim1.metric("Ancho del panel", f"{w:.3f} m")
-col_dim2.metric("Largo del panel", f"{l:.3f} m")
-col_dim3.metric("Área del panel (ancho × largo)", f"{area_m2:.3f} m²")
+custom_metric(col_dim1, "Ancho del panel", f"{w:.3f} m")
+custom_metric(col_dim2, "Largo del panel", f"{l:.3f} m")
+custom_metric(col_dim3, "Área del panel (ancho × largo)", f"{area_m2:.3f} m²")
 
 col_n, col_tilt, col_az = st.columns(3)
 n_panels = col_n.number_input("Número de paneles", min_value=1, max_value=5000,
@@ -358,9 +360,9 @@ with col_help.popover("ℹ️ ¿Qué es el CAPEX?", use_container_width=True):
 #                          max_value=battery["kwh"] * 10, value=st.session_state.get("battery_kwh", battery["kwh"]),
 #                          step=battery["kwh"])
 #     col_b1, col_b2, col_b3 = st.columns(3)
-#     col_b1.metric("Capacidad útil", f"{battery['usable_kwh']} kWh")
-#     col_b2.metric("Química", battery["chemistry"])
-#     col_b3.metric("Eficiencia RT", f"{battery['roundtrip_efficiency_pct']} %")
+#     custom_metric(col_b1, "Capacidad útil", f"{battery['usable_kwh']} kWh")
+#     custom_metric(col_b2, "Química", battery["chemistry"])
+#     custom_metric(col_b3, "Eficiencia RT", f"{battery['roundtrip_efficiency_pct']} %")
 #     bat_capex_usd = (bat_kwh / battery["kwh"]) * battery["kwh"] * battery["usd_per_kwh"]
 #     st.info(f"**CAPEX estimado baterías:** ${bat_capex_usd:,.0f} USD  |  "
 #             f"**Ciclos de vida:** {battery['cycles']:,}")

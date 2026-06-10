@@ -7,9 +7,11 @@ st.set_page_config(page_title="Equipo — GDMTH Solar", page_icon="👥", layout
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.state import keep_state
+from utils.theming import inject_theme, custom_metric
 
 keep_state()
 
+inject_theme("01")
 # ── CSS MEJORADO (Tarjetas, Avatares y Efectos Hover) ────────────────────────
 st.markdown("""
 <style>

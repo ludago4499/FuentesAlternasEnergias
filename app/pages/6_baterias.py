@@ -15,10 +15,12 @@ from core.plots import (
 )
 from core.exporting import chart_with_export
 from core.state import keep_state
+from utils.theming import inject_theme, custom_metric
 
 st.set_page_config(page_title="Baterías — GDMTH Solar", page_icon="🔋", layout="wide")
 keep_state()
 
+inject_theme("06")
 # ── CSS / Banner ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -147,10 +149,10 @@ if not discharge_hours:
     st.warning("La ventana horaria está vacía (inicio = fin): la batería no descargará. Ajusta el rango.")
 
 cspec1, cspec2, cspec3, cspec4 = st.columns(4)
-cspec1.metric("Capacidad útil total", f"{cfg['capacity_kwh']:,.1f} kWh")
-cspec2.metric("Potencia total", f"{cfg['power_kw']:,.1f} kW")
-cspec3.metric("CAPEX baterías", f"${bat_capex_usd:,.0f} USD")
-cspec4.metric("Modo de carga", "Solar (sin red)" if solar_only else "Solar + Red")
+custom_metric(cspec1, "Capacidad útil total", f"{cfg['capacity_kwh']:,.1f} kWh")
+custom_metric(cspec2, "Potencia total", f"{cfg['power_kw']:,.1f} kW")
+custom_metric(cspec3, "CAPEX baterías", f"${bat_capex_usd:,.0f} USD")
+custom_metric(cspec4, "Modo de carga", "Solar (sin red)" if solar_only else "Solar + Red")
 
 # ── Run dispatch (with battery) and the solar-only baseline ───────────────────
 # These are two hour-by-hour dispatch models. Running both un-cached on every
@@ -188,11 +190,11 @@ peak_red_pct = (peak_kw - peak_after) / peak_kw * 100 if peak_kw > 0 else 0.0
 st.markdown("<h3 class='section-title'>3️⃣ Impacto del arreglo</h3>", unsafe_allow_html=True)
 with st.container(border=True):
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Reducción energía en ventana", f"{win_red_pct:.1f} %")
-    k2.metric("Recorte de pico (demanda)", f"{peak_red_pct:.1f} %")
-    k3.metric("Ahorro anual extra (batería)", f"${incr_savings:,.0f} MXN",
+    custom_metric(k1, "Reducción energía en ventana", f"{win_red_pct:.1f} %")
+    custom_metric(k2, "Recorte de pico (demanda)", f"{peak_red_pct:.1f} %")
+    custom_metric(k3, "Ahorro anual extra (batería)", f"${incr_savings:,.0f} MXN",
               help="Ahorro adicional respecto al escenario sólo-FV.")
-    k4.metric("Payback de la batería",
+    custom_metric(k4, "Payback de la batería",
               f"{payback_batt:.1f} años" if payback_batt < 100 else ">100 años")
 
 # ── Desglose amplio de operación de la batería ────────────────────────────────
@@ -217,24 +219,24 @@ with st.container(border=True):
 
     st.markdown("**Energía de la batería (en el periodo cargado)**")
     e1, e2, e3, e4 = st.columns(4)
-    e1.metric("Cargada desde solar", f"{charge_solar_total:,.0f} kWh")
-    e2.metric("Cargada desde red", f"{charge_grid_total:,.0f} kWh")
-    e3.metric("Descargada al consumo", f"{discharge_total:,.0f} kWh")
-    e4.metric("Ciclos equivalentes", f"{equiv_cycles:,.0f}")
+    custom_metric(e1, "Cargada desde solar", f"{charge_solar_total:,.0f} kWh")
+    custom_metric(e2, "Cargada desde red", f"{charge_grid_total:,.0f} kWh")
+    custom_metric(e3, "Descargada al consumo", f"{discharge_total:,.0f} kWh")
+    custom_metric(e4, "Ciclos equivalentes", f"{equiv_cycles:,.0f}")
 
     st.markdown("**Aprovechamiento del excedente solar**")
     s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Excedente FV disponible", f"{surplus_total:,.0f} kWh")
-    s2.metric("Excedente usado en batería", f"{surplus_used:,.0f} kWh")
-    s3.metric("Excedente no aprovechado", f"{surplus_wasted:,.0f} kWh")
-    s4.metric("Pérdidas por eficiencia", f"{eff_losses:,.0f} kWh")
+    custom_metric(s1, "Excedente FV disponible", f"{surplus_total:,.0f} kWh")
+    custom_metric(s2, "Excedente usado en batería", f"{surplus_used:,.0f} kWh")
+    custom_metric(s3, "Excedente no aprovechado", f"{surplus_wasted:,.0f} kWh")
+    custom_metric(s4, "Pérdidas por eficiencia", f"{eff_losses:,.0f} kWh")
 
     st.markdown("**¿De dónde viene el ahorro extra de la batería? (vs. sólo-FV)**")
     d1, d2, d3 = st.columns(3)
-    d1.metric("Ahorro en Energía", f"${incr_energy:,.0f} MXN")
-    d2.metric("Ahorro en Capacidad", f"${incr_cap:,.0f} MXN",
+    custom_metric(d1, "Ahorro en Energía", f"${incr_energy:,.0f} MXN")
+    custom_metric(d2, "Ahorro en Capacidad", f"${incr_cap:,.0f} MXN",
               help="Cargo por demanda media en Punta — clave del valor de la batería.")
-    d3.metric("Ahorro en Distribución", f"${incr_dist:,.0f} MXN",
+    custom_metric(d3, "Ahorro en Distribución", f"${incr_dist:,.0f} MXN",
               help="Cargo por demanda máxima del mes.")
 
     if solar_only and discharge_total < 1.0:
@@ -277,9 +279,9 @@ with st.container(border=True):
     chart_with_export(fig_cost, key="bat_cost", filename="gasto_energia_comparacion")
 
     g1, g2, g3 = st.columns(3)
-    g1.metric("Factura anual sin FV", f"${annual_base.get('orig_total_mxn', 0):,.0f} MXN")
-    g2.metric("Factura anual sólo FV", f"${annual_base.get('total_mxn', 0):,.0f} MXN")
-    g3.metric("Factura anual FV + Batería", f"${annual_batt.get('total_mxn', 0):,.0f} MXN",
+    custom_metric(g1, "Factura anual sin FV", f"${annual_base.get('orig_total_mxn', 0):,.0f} MXN")
+    custom_metric(g2, "Factura anual sólo FV", f"${annual_base.get('total_mxn', 0):,.0f} MXN")
+    custom_metric(g3, "Factura anual FV + Batería", f"${annual_batt.get('total_mxn', 0):,.0f} MXN",
               delta=f"-${annual_base.get('total_mxn', 0) - annual_batt.get('total_mxn', 0):,.0f} MXN",
               delta_color="inverse")
 
@@ -346,10 +348,10 @@ with st.container(border=True):
         else:
             st.markdown("#### 🏆 Mejor arreglo encontrado")
             b1, b2, b3, b4 = st.columns(4)
-            b1.metric("Unidades óptimas", f"{best['units']}")
-            b2.metric("Capacidad", f"{best['capacity_kwh']:,.0f} kWh")
-            b3.metric("VPN de la batería", f"${best['npv_mxn']:,.0f} MXN")
-            b4.metric("Payback", f"{best['payback_years']:.1f} años"
+            custom_metric(b1, "Unidades óptimas", f"{best['units']}")
+            custom_metric(b2, "Capacidad", f"{best['capacity_kwh']:,.0f} kWh")
+            custom_metric(b3, "VPN de la batería", f"${best['npv_mxn']:,.0f} MXN")
+            custom_metric(b4, "Payback", f"{best['payback_years']:.1f} años"
                       if best["payback_years"] < 100 else ">100 años")
 
             if st.button(f"📌 Aplicar mejor arreglo ({best['units']} unidades)", use_container_width=True):

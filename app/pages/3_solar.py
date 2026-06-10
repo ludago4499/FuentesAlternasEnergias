@@ -15,10 +15,12 @@ from core.plots import (irradiance_plot, generation_bar, poa_heatmap,
                          sunrise_sunset_pattern_plot)
 from core.exporting import chart_with_export
 from core.state import keep_state
+from utils.theming import inject_theme, custom_metric
 
 st.set_page_config(page_title="Análisis Solar — GDMTH Solar", page_icon="🌞", layout="wide")
 keep_state()
 
+inject_theme("03")
 st.markdown("<h1 style='color:#0039A6;font-weight:700'>Análisis Solar — Modelo Jensen (pvlib)</h1>",
             unsafe_allow_html=True)
 
@@ -221,12 +223,12 @@ if run_btn or "irradiance_df" in st.session_state:
     st.caption(f"Fuente activa: **{_ws_label}**")
 
     m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("Generación total", f"{total_kwh:,.0f} kWh")
-    m2.metric("Períodos calculados", f"{n_periods_actual:,}")
-    m3.metric("Factor de capacidad", f"{cf:.1f} %")
-    m4.metric("PSH totales", f"{psh:.1f} h")
-    m5.metric("POA máxima", f"{max_poa:.0f} W/m²")
-    m6.metric("Promedio diario", f"{avg_daily_kwh:.1f} kWh/día")
+    custom_metric(m1, "Generación total", f"{total_kwh:,.0f} kWh")
+    custom_metric(m2, "Períodos calculados", f"{n_periods_actual:,}")
+    custom_metric(m3, "Factor de capacidad", f"{cf:.1f} %")
+    custom_metric(m4, "PSH totales", f"{psh:.1f} h")
+    custom_metric(m5, "POA máxima", f"{max_poa:.0f} W/m²")
+    custom_metric(m6, "Promedio diario", f"{avg_daily_kwh:.1f} kWh/día")
 
     # ── 4 TABS ─────────────────────────────────────────────────────────────────
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -292,10 +294,10 @@ if run_btn or "irradiance_df" in st.session_state:
 
         if losses:
             ec1, ec2, ec3, ec4 = st.columns(4)
-            ec1.metric("POA real P50", f"{losses.get('poa_p50_wm2', 0):.0f} W/m²")
-            ec2.metric("POA real P90", f"{losses.get('poa_p90_wm2', 0):.0f} W/m²")
-            ec3.metric("POA despejado P50", f"{losses.get('poa_clearsky_p50_wm2', 0):.0f} W/m²")
-            ec4.metric("POA despejado P90", f"{losses.get('poa_clearsky_p90_wm2', 0):.0f} W/m²")
+            custom_metric(ec1, "POA real P50", f"{losses.get('poa_p50_wm2', 0):.0f} W/m²")
+            custom_metric(ec2, "POA real P90", f"{losses.get('poa_p90_wm2', 0):.0f} W/m²")
+            custom_metric(ec3, "POA despejado P50", f"{losses.get('poa_clearsky_p50_wm2', 0):.0f} W/m²")
+            custom_metric(ec4, "POA despejado P90", f"{losses.get('poa_clearsky_p90_wm2', 0):.0f} W/m²")
 
         fig_exc = poa_exceedance_plot(df, df_clearsky)
         chart_with_export(fig_exc, key="sol_exc", filename="poa_excedencia")
@@ -315,15 +317,15 @@ if run_btn or "irradiance_df" in st.session_state:
 
         if losses:
             lm1, lm2, lm3, lm4, lm5 = st.columns(5)
-            lm1.metric("Nubosidad", f"{losses.get('loss_cloud_pct', 0):.1f} %",
+            custom_metric(lm1, "Nubosidad", f"{losses.get('loss_cloud_pct', 0):.1f} %",
                         delta=f"-{losses.get('loss_cloud_kwh', 0):,.0f} kWh", delta_color="inverse")
-            lm2.metric("Temperatura", f"{losses.get('loss_temp_pct', 0):.1f} %",
+            custom_metric(lm2, "Temperatura", f"{losses.get('loss_temp_pct', 0):.1f} %",
                         delta=f"-{losses.get('loss_temp_kwh', 0):,.0f} kWh", delta_color="inverse")
-            lm3.metric("Suciedad", f"{losses.get('loss_soiling_pct', 0):.1f} %",
+            custom_metric(lm3, "Suciedad", f"{losses.get('loss_soiling_pct', 0):.1f} %",
                         delta=f"-{losses.get('loss_soiling_kwh', 0):,.0f} kWh", delta_color="inverse")
-            lm4.metric("Cableado", f"{losses.get('loss_wiring_pct', 0):.1f} %",
+            custom_metric(lm4, "Cableado", f"{losses.get('loss_wiring_pct', 0):.1f} %",
                         delta=f"-{losses.get('loss_wiring_kwh', 0):,.0f} kWh", delta_color="inverse")
-            lm5.metric("Inversor", f"{losses.get('loss_inverter_pct', 0):.1f} %",
+            custom_metric(lm5, "Inversor", f"{losses.get('loss_inverter_pct', 0):.1f} %",
                         delta=f"-{losses.get('loss_inverter_kwh', 0):,.0f} kWh", delta_color="inverse")
 
             fig_wf = losses_waterfall_chart(losses)
@@ -335,12 +337,12 @@ if run_btn or "irradiance_df" in st.session_state:
             chart_with_export(fig_tbl, key="sol_eff_tbl", filename="eficiencia_componentes")
 
             eff_col1, eff_col2 = st.columns(2)
-            eff_col1.metric(
+            custom_metric(eff_col1, 
                 "Eficiencia global del sistema",
                 f"{losses.get('overall_system_efficiency_pct', 0):.1f} %",
                 help="Generación AC / Potencial cielo despejado",
             )
-            eff_col2.metric(
+            custom_metric(eff_col2, 
                 "Factor de derating por temperatura",
                 f"{losses.get('avg_temp_derate_factor', 1.0):.3f}",
                 help="Media del factor (1 + α·(T_cell−25)) durante horas diurnas",

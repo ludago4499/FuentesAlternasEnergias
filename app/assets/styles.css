@@ -1,0 +1,235 @@
+/* ============================================================================
+   STREGER SOLAR — Tema "editorial cortante" (P3R en versión clara)
+   Solo estética. Cada bloque está rotulado y puede comentarse de forma
+   independiente sin afectar la lógica de la app.
+   ============================================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Anton&display=swap');
+
+/* ── 0) Paleta (variables) ────────────────────────────────────────────────── */
+:root {
+    --cream:  #F5F0E1;   /* fondo */
+    --ink:    #15151A;   /* estructural: texto, sidebar, bordes */
+    --accent: #FFD400;   /* amarillo: highlights, esquinas, métricas */
+    --muted:  #88826F;   /* texto secundario */
+    --card:   #FAF6EB;   /* off-white para tarjetas */
+    --hair:   0.5px;     /* grosor máximo de líneas */
+}
+
+/* ── 1) Fondo global + tipografía base ────────────────────────────────────── */
+.stApp,
+[data-testid="stAppViewContainer"] {
+    background: var(--cream) !important;
+    color: var(--ink);
+}
+html, body, [class*="css"], .stMarkdown, p, label, span, div {
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+/* Labels / caps con tracking */
+label, .stRadio label, .stCheckbox label, [data-testid="stWidgetLabel"] p {
+    font-weight: 600 !important;
+    letter-spacing: 0.5px;
+    color: var(--ink) !important;
+}
+.stCaption, [data-testid="stCaptionContainer"], small {
+    color: var(--muted) !important;
+    letter-spacing: 0.3px;
+}
+
+/* ── 2) Headers — Anton itálica condensada cortante ───────────────────────── */
+h1, h2, h3, h4 {
+    font-family: "Anton", "Inter", sans-serif !important;
+    font-style: italic !important;
+    font-weight: 400 !important;
+    letter-spacing: 1px !important;
+    text-transform: uppercase;
+    color: var(--ink) !important;
+    transform: skewX(-3deg);
+    transform-origin: left;
+}
+h1 { font-size: 2.6rem !important; line-height: 1.02 !important; }
+h2 { font-size: 1.9rem !important; }
+h3 { font-size: 1.4rem !important; }
+/* Subrayado-acento amarillo bajo h1/h2 */
+h1::after, h2::after {
+    content: "";
+    display: block;
+    width: 64px; height: 4px;
+    background: var(--accent);
+    margin-top: 6px;
+    transform: skewX(-18deg);
+}
+
+/* ── 3) Sidebar — trapecio inclinado (lado derecho más angosto) ───────────── */
+[data-testid="stSidebar"] {
+    background: transparent !important;
+}
+[data-testid="stSidebar"] > div:first-child {
+    background: var(--ink) !important;
+    clip-path: polygon(0 0, 100% 0, 94% 100%, 0 100%);
+    padding-right: 28px;
+}
+[data-testid="stSidebar"] * {
+    color: var(--cream) !important;
+}
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {
+    color: var(--accent) !important;
+}
+/* Las métricas dentro del sidebar viven sobre tarjeta off-white: conservan texto
+   oscuro para que NO se vuelvan invisibles por el override crema de arriba. */
+[data-testid="stSidebar"] .pmetric-label { color: var(--muted) !important; }
+[data-testid="stSidebar"] .pmetric-value { color: var(--ink) !important; }
+[data-testid="stSidebar"] .pmetric-delta { color: var(--ink) !important; }
+
+/* ── 4) Items del menú lateral (navegación de páginas) ────────────────────── */
+[data-testid="stSidebarNav"] ul { gap: 6px; }
+[data-testid="stSidebarNav"] li a {
+    border: var(--hair) solid var(--accent);
+    background: transparent;
+    color: var(--cream) !important;
+    clip-path: polygon(0 0, 100% 0, 96% 100%, 0 100%);  /* corte diagonal sutil */
+    border-radius: 0 !important;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    transition: none;
+}
+[data-testid="stSidebarNav"] li a:hover {
+    background: rgba(255, 212, 0, 0.15);
+}
+/* Item activo: amarillo sólido, texto negro */
+[data-testid="stSidebarNav"] li a[aria-current="page"] {
+    background: var(--accent) !important;
+    color: var(--ink) !important;
+}
+[data-testid="stSidebarNav"] li a[aria-current="page"] * {
+    color: var(--ink) !important;
+}
+
+/* ── 5) Cards — esquina inferior izquierda cortada + relleno amarillo ──────── */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    position: relative;
+}
+/* La caja interna se recorta en diagonal en la esquina inferior izquierda */
+[data-testid="stVerticalBlockBorderWrapper"] > div {
+    background: var(--card);
+    border: var(--hair) solid var(--ink) !important;
+    border-radius: 0 !important;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 30px 100%, 0 calc(100% - 30px));
+}
+/* Triángulo amarillo que "rellena" el corte (vive en el wrapper, sin recortar) */
+[data-testid="stVerticalBlockBorderWrapper"]::after {
+    content: "";
+    position: absolute;
+    left: 0; bottom: 0;
+    width: 30px; height: 30px;
+    background: var(--accent);
+    clip-path: polygon(0 0, 0 100%, 100% 100%);
+    pointer-events: none;
+}
+
+/* ── 6) Métricas personalizadas (custom_metric) ───────────────────────────── */
+.pmetric {
+    position: relative;
+    background: var(--card);
+    border: var(--hair) solid var(--ink);
+    padding: 14px 16px 16px 16px;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 22px 100%, 0 calc(100% - 22px));
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+.pmetric::after {              /* acento amarillo en la esquina cortada */
+    content: "";
+    position: absolute;
+    left: 0; bottom: 0;
+    width: 22px; height: 22px;
+    background: var(--accent);
+    clip-path: polygon(0 0, 0 100%, 100% 100%);
+}
+.pmetric-label {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted) !important;
+}
+.pmetric-value {
+    display: block;
+    font-family: "Anton", sans-serif;
+    font-style: italic;
+    font-size: 2.1rem;
+    line-height: 1.05;
+    color: var(--ink) !important;
+    margin-top: 4px;
+    transform: skewX(-4deg);
+    transform-origin: left;
+}
+.pmetric-delta { display: block; font-size: 0.82rem; font-weight: 700; margin-top: 2px; letter-spacing: 0.5px; }
+.pmetric-delta.up   { color: #2E7D32; }
+.pmetric-delta.down { color: #C62828; }
+.pmetric-delta.flat { color: var(--muted); }
+
+/* ── 7) Botones ───────────────────────────────────────────────────────────── */
+.stButton > button,
+[data-testid="stDownloadButton"] > button,
+[data-testid="stBaseButton-primary"],
+[data-testid="stBaseButton-secondary"] {
+    background: var(--ink) !important;
+    color: var(--cream) !important;
+    border: var(--hair) solid var(--ink) !important;
+    border-radius: 0 !important;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 700 !important;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+.stButton > button:hover,
+[data-testid="stDownloadButton"] > button:hover {
+    background: var(--accent) !important;
+    color: var(--ink) !important;
+}
+
+/* ── 8) Watermark — número de página en la esquina superior derecha ───────── */
+.page-watermark {
+    position: fixed;
+    top: 52px; right: 26px;
+    font-family: "Anton", sans-serif;
+    font-style: italic;
+    font-size: 7rem;
+    line-height: 1;
+    color: var(--accent);
+    opacity: 0.5;
+    z-index: 0;
+    pointer-events: none;
+    user-select: none;
+    transform: skewX(-6deg);
+}
+
+/* ── 9) Líneas ≤0.5px (divisores, bordes de inputs, tablas) ───────────────── */
+hr, [data-testid="stDivider"] hr {
+    border: none !important;
+    border-top: var(--hair) solid var(--ink) !important;
+    opacity: 0.6;
+}
+[data-baseweb="input"], [data-baseweb="select"] > div, .stNumberInput input, .stTextInput input {
+    border-radius: 0 !important;
+    border-width: var(--hair) !important;
+}
+[data-testid="stTable"] td, [data-testid="stTable"] th,
+[data-testid="stDataFrame"] [role="gridcell"] { border-width: var(--hair) !important; }
+
+/* ── 10) Acentos de widgets (radio, slider, toggle, expander) ─────────────── */
+[data-testid="stExpander"] {
+    border: var(--hair) solid var(--ink) !important;
+    border-radius: 0 !important;
+    background: var(--card);
+}
+.stSlider [data-baseweb="slider"] [role="slider"] { background: var(--accent) !important; }
+.stTabs [data-baseweb="tab-list"] { border-bottom: var(--hair) solid var(--ink); }
+.stTabs [aria-selected="true"] { color: var(--ink) !important; border-bottom: 3px solid var(--accent) !important; }
+
+/* Mantener el contenido por encima del watermark */
+[data-testid="stMain"] .block-container { position: relative; z-index: 1; }

@@ -1,0 +1,10 @@
+# Tema base de la app (editorial cortante — P3R clara).
+# Nota: los flags --theme.* en run.sh / run.ps1 sobreescriben esto; ya están
+# alineados a esta misma paleta.
+[theme]
+base = "light"
+primaryColor = "#FFD400"
+backgroundColor = "#F5F0E1"
+secondaryBackgroundColor = "#FAF6EB"
+textColor = "#15151A"
+font = "sans serif"

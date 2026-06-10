@@ -11,11 +11,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.plots import demand_injection_plot
 from core.exporting import chart_with_export
 from core.state import keep_state
+from utils.theming import inject_theme, custom_metric
 from core.battery import load_batteries
 
 st.set_page_config(page_title="Demanda e Inyección — GDMTH Solar", page_icon="📊", layout="wide")
 keep_state()
 
+inject_theme("04")
 st.markdown("<h1 style='color:#0039A6;font-weight:700'>Demanda Industrial e Inyección Solar</h1>",
             unsafe_allow_html=True)
 st.caption("Genera un perfil típico sintético o sube tu propia curva de carga.")
@@ -322,12 +324,12 @@ self_ratio    = min(total_sol_kwh, total_dem_kwh) / total_sol_kwh * 100 if total
 surplus_kwh   = max(0.0, total_sol_kwh - total_dem_kwh)
 
 m1, m2, m3, m4, m5, m6 = st.columns(6)
-m1.metric("Demanda pico original",  f"{peak_orig:.1f} kW")
-m2.metric("Demanda pico neta",      f"{peak_net:.1f} kW")
-m3.metric("Peak shaving",           f"{peak_shaving:.1f} %")
-m4.metric("Autoconsumo solar",      f"{self_ratio:.1f} %")
-m5.metric("Excedente FV",           f"{surplus_kwh:.1f} kWh")
-m6.metric("Reducción energía",
+custom_metric(m1, "Demanda pico original",  f"{peak_orig:.1f} kW")
+custom_metric(m2, "Demanda pico neta",      f"{peak_net:.1f} kW")
+custom_metric(m3, "Peak shaving",           f"{peak_shaving:.1f} %")
+custom_metric(m4, "Autoconsumo solar",      f"{self_ratio:.1f} %")
+custom_metric(m5, "Excedente FV",           f"{surplus_kwh:.1f} kWh")
+custom_metric(m6, "Reducción energía",
           f"{(total_dem_kwh - float(net_view.sum())) / total_dem_kwh * 100:.1f} %"
           if total_dem_kwh > 0 else "—")
 

@@ -31,6 +31,7 @@ from core.plots import (irradiance_plot, monthly_demand_vs_solar_bar,
                         monthly_savings_bar, continuity_cashflow_bar)
 from core.exporting import chart_with_export
 from core.state import keep_state
+from utils.theming import inject_theme, custom_metric
 
 st.set_page_config(
     page_title="Streger Solar — Análisis CFE",
@@ -40,6 +41,7 @@ st.set_page_config(
 )
 keep_state()
 
+inject_theme("00")
 DATA = Path(__file__).parent / "data"
 
 
@@ -133,12 +135,7 @@ for _k, _v in _DEFAULTS.items():
         st.session_state[_k] = _v
 
 # ── Global CSS ────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-    h1 { color: #0039A6 !important; font-weight: 800 !important; }
-    h2, h3 { color: #F57C00 !important; }
-</style>
-""", unsafe_allow_html=True)
+# (Los colores de header los define ahora el tema en utils/theming → styles.css.)
 
 st.markdown(
     "<h1 style='margin-bottom:0'>☀️ Streger Solar — Análisis CFE</h1>"
@@ -179,12 +176,12 @@ with st.sidebar:
     st.divider()
     st.markdown("### ⚙️ Resumen")
     cs1, cs2 = st.columns(2)
-    cs1.metric("Ciudad", st.session_state.get("city", "—").split(",")[0])
-    cs2.metric("Modo", st.session_state.get("tariff_mode", "GDMTO"))
+    custom_metric(cs1, "Ciudad", st.session_state.get("city", "—").split(",")[0])
+    custom_metric(cs2, "Modo", st.session_state.get("tariff_mode", "GDMTO"))
     cs3, cs4 = st.columns(2)
     _kwp = st.session_state.get("s2_system_kwp") or st.session_state.get("system_kwp", 0.0)
-    cs3.metric("Sistema (kWp)", f"{_kwp:.1f}")
-    cs4.metric("Respaldo (h)", st.session_state.get("backup_hours", 0))
+    custom_metric(cs3, "Sistema (kWp)", f"{_kwp:.1f}")
+    custom_metric(cs4, "Respaldo (h)", st.session_state.get("backup_hours", 0))
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECCIÓN 1 — VISTA RÁPIDA (desplegable / colapsable)
@@ -269,12 +266,12 @@ with st.expander("🔆 Sección 1 — Vista Rápida · ubicación, orientación 
     kwh_day_panel = energy_kwh(pv_day_kw, df_day)
 
     q1, q2, q3, q4 = st.columns(4)
-    q1.metric("Generación por panel", f"{kwh_day_panel:.2f} kWh/día",
+    custom_metric(q1, "Generación por panel", f"{kwh_day_panel:.2f} kWh/día",
               help=f"Panel de referencia: {panel_ref['brand']} {panel_ref['model']} ({panel_ref['wp']} W)")
-    q2.metric("Equivalente mensual", f"{kwh_day_panel * 30:.0f} kWh/mes",
+    custom_metric(q2, "Equivalente mensual", f"{kwh_day_panel * 30:.0f} kWh/mes",
               help="Por panel (≈ 30 días como el día representativo).")
-    q3.metric("Horas solares pico", f"{peak_sun_hours(df_day):.1f} h")
-    q4.metric("POA máxima", f"{float(df_day['poa_global'].max()):.0f} W/m²")
+    custom_metric(q3, "Horas solares pico", f"{peak_sun_hours(df_day):.1f} h")
+    custom_metric(q4, "POA máxima", f"{float(df_day['poa_global'].max()):.0f} W/m²")
 
     chart_with_export(irradiance_plot(df_day), key="s1_irradiance", filename="irradiancia_dia")
     st.caption(f"Día representativo: {_TYPICAL_DAY} (equinoccio) · Cielo despejado Ineichen · "
@@ -436,9 +433,9 @@ if s2_on:
     chart_with_export(monthly_demand_vs_solar_bar(MONTH_ABBR_ES, demand_monthly, gen_monthly),
                       key="s2_balance", filename="balance_demanda_generacion")
     bal1, bal2, bal3 = st.columns(3)
-    bal1.metric("Demanda anual", f"{total_dem:,.0f} kWh")
-    bal2.metric("Generación FV anual", f"{total_gen:,.0f} kWh")
-    bal3.metric("Balance anual neto", f"{total_dem - total_gen:,.0f} kWh",
+    custom_metric(bal1, "Demanda anual", f"{total_dem:,.0f} kWh")
+    custom_metric(bal2, "Generación FV anual", f"{total_gen:,.0f} kWh")
+    custom_metric(bal3, "Balance anual neto", f"{total_dem - total_gen:,.0f} kWh",
                 delta=f"FV cubre {coverage:.1f}% del consumo",
                 help="Positivo: consumo no cubierto por FV. Negativo: excedente anual.")
 
@@ -477,8 +474,8 @@ if s2_on:
                               for k, g in zip(demand_monthly, gen_monthly))
             ahorro_fv_anual = pago_actual - pago_con_fv
             ex1, ex2 = st.columns(2)
-            ex1.metric("Pago anual actual", f"$ {pago_actual:,.2f}")
-            ex2.metric("Pago anual con FV", f"$ {pago_con_fv:,.2f}",
+            custom_metric(ex1, "Pago anual actual", f"$ {pago_actual:,.2f}")
+            custom_metric(ex2, "Pago anual con FV", f"$ {pago_con_fv:,.2f}",
                        delta=f"-$ {ahorro_fv_anual:,.2f}", delta_color="inverse")
             st.caption("Estimación rápida: Σ kWh × costo medio — no requiere el motor tarifario.")
     else:
@@ -495,12 +492,12 @@ if s2_on:
         ahorro_fv_anual = annual["savings_mxn"]
 
         fa1, fa2, fa3, fa4 = st.columns(4)
-        fa1.metric("Factura anual sin FV", f"$ {annual['orig_total_mxn']:,.2f}")
-        fa2.metric("Factura anual con FV", f"$ {annual['total_mxn']:,.2f}")
-        fa3.metric("Ahorro anual", f"$ {annual['savings_mxn']:,.2f}",
+        custom_metric(fa1, "Factura anual sin FV", f"$ {annual['orig_total_mxn']:,.2f}")
+        custom_metric(fa2, "Factura anual con FV", f"$ {annual['total_mxn']:,.2f}")
+        custom_metric(fa3, "Ahorro anual", f"$ {annual['savings_mxn']:,.2f}",
                    delta=f"{annual['savings_mxn'] / annual['orig_total_mxn'] * 100:.1f}%"
                    if annual["orig_total_mxn"] > 0 else None)
-        fa4.metric("Tarifa", calc_gdmto.name, help="Componentes calibrados al recibo real.")
+        custom_metric(fa4, "Tarifa", calc_gdmto.name, help="Componentes calibrados al recibo real.")
 
         chart_with_export(monthly_savings_bar(proj["monthly"]),
                           key="s2_monthly_savings", filename="ahorro_mensual_gdmto")
@@ -585,17 +582,17 @@ if s3_on:
                         f"requiere **{best['e_req_kwh']:,.1f} kWh** para {backup_hours} h "
                         f"de respaldo a {p_crit_kw:,.1f} kW")
             pc1, pc2, pc3, pc4 = st.columns(4)
-            pc1.metric("Unidades", f"{best['units']}")
-            pc2.metric("Energía útil", f"{best['total_usable_kwh']:,.1f} kWh")
-            pc3.metric("Potencia", f"{best['total_power_kw']:,.1f} kW")
-            pc4.metric("CAPEX", f"$ {best['capex_mxn']:,.2f} MXN",
+            custom_metric(pc1, "Unidades", f"{best['units']}")
+            custom_metric(pc2, "Energía útil", f"{best['total_usable_kwh']:,.1f} kWh")
+            custom_metric(pc3, "Potencia", f"{best['total_power_kw']:,.1f} kW")
+            custom_metric(pc4, "CAPEX", f"$ {best['capex_mxn']:,.2f} MXN",
                        help=f"$ {best['capex_usd']:,.0f} USD × TDC {usd_mxn_s3:.2f}")
             pc5, pc6, pc7 = st.columns(3)
-            pc5.metric("Ciclos", f"{best['cycles']:,}",
+            custom_metric(pc5, "Ciclos", f"{best['cycles']:,}",
                        help=f"Banda típica LiFePO4: {best['cycle_band']} ciclos.")
-            pc6.metric("Vida (ciclado diario)", f"{best['life_years_daily_cycling']:.1f} años",
+            custom_metric(pc6, "Vida (ciclado diario)", f"{best['life_years_daily_cycling']:.1f} años",
                        help=best["life_note"])
-            pc7.metric("DoD / Eficiencia RT",
+            custom_metric(pc7, "DoD / Eficiencia RT",
                        f"{best['dod_pct']:.0f}% / {best['roundtrip_efficiency_pct']:.0f}%")
             st.caption("ℹ️ " + best["life_note"])
 
@@ -677,16 +674,16 @@ if s4_on:
                     f"apagones evitados $ {outage_cost:,.2f}")
 
         rc1, rc2, rc3, rc4 = st.columns(4)
-        rc1.metric("Payback — Con FV",
+        custom_metric(rc1, "Payback — Con FV",
                    f"{cf_con['payback_years']:.1f} años" if cf_con["payback_years"] < 100 else "∞",
                    help="CAPEX total (batería + FV) / beneficio anual (ahorro FV + apagones evitados).")
-        rc2.metric("VPN — Con FV", f"$ {cf_con['npv_mxn']:,.2f}",
+        custom_metric(rc2, "VPN — Con FV", f"$ {cf_con['npv_mxn']:,.2f}",
                    delta="Rentable" if cf_con["npv_mxn"] > 0 else "No rentable",
                    delta_color="normal" if cf_con["npv_mxn"] > 0 else "inverse")
-        rc3.metric("Payback — Sin FV",
+        custom_metric(rc3, "Payback — Sin FV",
                    f"{cf_sin['payback_years']:.1f} años" if cf_sin["payback_years"] < 100 else "∞",
                    help="CAPEX batería / costo anual de apagones evitado.")
-        rc4.metric("VPN — Sin FV", f"$ {cf_sin['npv_mxn']:,.2f}",
+        custom_metric(rc4, "VPN — Sin FV", f"$ {cf_sin['npv_mxn']:,.2f}",
                    delta="Rentable" if cf_sin["npv_mxn"] > 0 else "No rentable",
                    delta_color="normal" if cf_sin["npv_mxn"] > 0 else "inverse")
 

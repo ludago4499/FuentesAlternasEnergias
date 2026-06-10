@@ -5,6 +5,8 @@ AppTest: default Coatepec site, Streger receipt values, receipt totals in the
 panels. Also covers the GDMTH branch guards on pages 5 and 6.
 """
 
+import html
+import re
 from pathlib import Path
 
 import pytest
@@ -13,16 +15,33 @@ from streamlit.testing.v1 import AppTest
 APP_DIR = Path(__file__).parent.parent / "app"
 ANNUAL_RECEIPT_TOTAL = 12 * 29_591.16   # 12 identical Streger months
 
+# Metrics are now rendered as HTML via utils.theming.custom_metric (not st.metric),
+# so they live in at.markdown. This parses label→value back out of that HTML.
+_PMETRIC_RE = re.compile(
+    r'pmetric-label">(.*?)</span><span class="pmetric-value">(.*?)</span>', re.S
+)
+
+
+def _custom_metrics(at: AppTest) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for md in at.markdown:
+        v = getattr(md, "value", "")
+        if "pmetric-label" not in v:
+            continue
+        for label, value in _PMETRIC_RE.findall(v):
+            out[html.unescape(label).strip()] = html.unescape(value).strip()
+    return out
+
 
 def _main_app() -> AppTest:
     return AppTest.from_file(str(APP_DIR / "main.py"), default_timeout=120)
 
 
 def _metric_value(at: AppTest, label: str) -> str:
-    for m in at.metric:
-        if m.label == label:
-            return m.value
-    raise AssertionError(f"metric '{label}' not found; got {[m.label for m in at.metric]}")
+    metrics = _custom_metrics(at)
+    if label in metrics:
+        return metrics[label]
+    raise AssertionError(f"metric '{label}' not found; got {list(metrics)}")
 
 
 def _money(s: str) -> float:
@@ -40,7 +59,7 @@ def test_s1_vista_rapida_defaults():
     assert at.session_state["tilt"] == pytest.approx(19.0)
     assert at.session_state["azimuth"] == pytest.approx(0.0)
     # Quick per-panel estimate rendered
-    assert any("Generación por panel" == m.label for m in at.metric)
+    assert "Generación por panel" in _custom_metrics(at)
 
 
 def test_s2_desglose_formal_reproduces_receipt_sin_solar():
@@ -100,7 +119,7 @@ def test_s4_continuity_evaluation_and_quote_override():
     at.number_input(key="s4_outage").set_value(80_000.0).run()
     assert not at.exception
     assert at.session_state["outage_cost_annual"] == pytest.approx(80_000.0)
-    labels = [m.label for m in at.metric]
+    labels = list(_custom_metrics(at))
     assert "Payback — Sin FV" in labels and "VPN — Con FV" in labels
     catalog_capex = at.session_state["bess_proposal"]["capex_mxn"]
     sin_fv_payback = float(_metric_value(at, "Payback — Sin FV").split()[0])
@@ -156,7 +175,7 @@ def test_continuity_page_computes_roi_with_quote_and_outage():
     at.session_state["outage_cost_annual"] = 120_000.0
     at.run()
     assert not at.exception
-    labels = [m.label for m in at.metric]
+    labels = list(_custom_metrics(at))
     assert any("ROI" in l for l in labels)
     assert any("VPN" in l for l in labels)
 

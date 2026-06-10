@@ -23,7 +23,8 @@ pip install -r (Join-Path $ScriptDir "requirements.txt") -q
 Write-Host "Starting Streamlit app at http://localhost:8501" -ForegroundColor Green
 streamlit run (Join-Path $ScriptDir "app\main.py") `
     --server.port 8501 `
-    --theme.primaryColor "#0039A6" `
-    --theme.backgroundColor "#FFFFFF" `
-    --theme.secondaryBackgroundColor "#F0F4FF" `
-    --theme.textColor "#1A1A2E"
+    --theme.base "light" `
+    --theme.primaryColor "#FFD400" `
+    --theme.backgroundColor "#F5F0E1" `
+    --theme.secondaryBackgroundColor "#FAF6EB" `
+    --theme.textColor "#15151A"

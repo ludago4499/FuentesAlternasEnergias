@@ -132,6 +132,13 @@ def chart_with_export(
     filename : base name for the downloaded files (defaults to ``key``)
     df : optional explicit DataFrame to export instead of inferring from ``fig``
     """
+    # Tema visual del proyecto (degrada en silencio si no está disponible).
+    try:
+        from utils.theming import apply_plotly_theme
+        apply_plotly_theme(fig)
+    except Exception:
+        pass
+
     st.plotly_chart(fig, use_container_width=use_container_width, key=f"plot_{key}")
 
     data = df if df is not None else figure_to_dataframe(fig)
