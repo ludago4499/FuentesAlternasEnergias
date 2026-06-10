@@ -327,6 +327,59 @@ def typical_day_profile_plot(
     return fig
 
 
+def continuity_cashflow_bar(
+    months: list[int],
+    flows_con_fv: list[float],
+    flows_sin_fv: list[float],
+    cumulative_con_fv: list[float] | None = None,
+    cumulative_sin_fv: list[float] | None = None,
+) -> go.Figure:
+    """
+    Monthly present-value cashflow bars for the continuity investment under two
+    scenarios (con FV vs sin FV / battery-only). Month 0 carries the initial
+    CAPEX as a negative bar; optional cumulative-PV lines on a secondary axis.
+    """
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    fig.add_trace(go.Bar(
+        x=months, y=list(flows_con_fv), name="Flujo mensual VP — Con FV",
+        marker_color=SOLAR_YELLOW, marker_line_color=SOLAR_ORANGE, marker_line_width=0.5,
+        hovertemplate="Mes %{x}: $%{y:,.0f}<extra>Con FV</extra>",
+    ), secondary_y=False)
+    fig.add_trace(go.Bar(
+        x=months, y=list(flows_sin_fv), name="Flujo mensual VP — Sin FV (sólo batería)",
+        marker_color=LIGHT_BLUE,
+        hovertemplate="Mes %{x}: $%{y:,.0f}<extra>Sin FV</extra>",
+    ), secondary_y=False)
+
+    if cumulative_con_fv is not None:
+        fig.add_trace(go.Scatter(
+            x=months, y=list(cumulative_con_fv), name="Acumulado VP — Con FV",
+            line=dict(color=GREEN, width=2.5),
+            hovertemplate="Mes %{x}: $%{y:,.0f}<extra>Acum. Con FV</extra>",
+        ), secondary_y=True)
+    if cumulative_sin_fv is not None:
+        fig.add_trace(go.Scatter(
+            x=months, y=list(cumulative_sin_fv), name="Acumulado VP — Sin FV",
+            line=dict(color=TEC_BLUE, width=2.5, dash="dot"),
+            hovertemplate="Mes %{x}: $%{y:,.0f}<extra>Acum. Sin FV</extra>",
+        ), secondary_y=True)
+
+    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+    fig.update_layout(
+        barmode="group",
+        template="plotly_white",
+        height=440,
+        xaxis_title="Mes del proyecto (0 = inversión inicial)",
+        legend=dict(orientation="h", y=-0.18),
+        margin=dict(t=20, b=70),
+        hovermode="x unified",
+    )
+    fig.update_yaxes(title_text="Flujo mensual a valor presente (MXN)", secondary_y=False)
+    fig.update_yaxes(title_text="Acumulado VP (MXN)", secondary_y=True, showgrid=False)
+    return fig
+
+
 def battery_dispatch_plot(
     demand_kw: pd.Series,
     solar_kw: pd.Series,

@@ -80,6 +80,51 @@ def size_bess(p_crit_kw: float, hours: float, battery: dict,
     }
 
 
+def continuity_cashflows(
+    capex_mxn: float,
+    annual_benefit_mxn: float,
+    project_life_years: int = 10,
+    inflation_pct: float = 5.0,
+    discount_pct: float = 10.0,
+) -> dict:
+    """
+    Present-value cashflow series for the continuity investment.
+
+    Annual NPV uses the same pattern as battery.optimize_units:
+        NPV = −CAPEX + Σ_y benefit·(1+infl)^(y−1) / (1+disc)^y
+    Each year's discounted net benefit is spread evenly over its 12 months for
+    the monthly chart, so the monthly bars sum exactly to the NPV. Month 0 is
+    the initial CAPEX as a negative flow.
+    """
+    inflation = inflation_pct / 100.0
+    discount = discount_pct / 100.0
+    years = range(1, int(project_life_years) + 1)
+
+    annual_pv = [annual_benefit_mxn * ((1 + inflation) ** (y - 1)) / ((1 + discount) ** y)
+                 for y in years]
+    npv = -capex_mxn + sum(annual_pv)
+
+    monthly_pv = [-capex_mxn]
+    for pv_y in annual_pv:
+        monthly_pv.extend([pv_y / 12.0] * 12)
+
+    cumulative = []
+    acc = 0.0
+    for f in monthly_pv:
+        acc += f
+        cumulative.append(acc)
+
+    payback_years = capex_mxn / annual_benefit_mxn if annual_benefit_mxn > 0 else float("inf")
+
+    return {
+        "months": list(range(len(monthly_pv))),
+        "monthly_pv_flows": monthly_pv,
+        "cumulative_pv": cumulative,
+        "npv_mxn": npv,
+        "payback_years": payback_years,
+    }
+
+
 def propose_bess(p_crit_kw: float, hours: float, usd_mxn: float = 17.5,
                  catalog: list[dict] | None = None) -> dict:
     """

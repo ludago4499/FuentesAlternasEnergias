@@ -25,10 +25,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from core.jensen import run_jensen_model, compute_pv_generation, energy_kwh, peak_sun_hours
 from core.gdmto import GDMTOCalculator, MONTH_ABBR_ES
-from core.resilience import propose_bess, kva_to_kw
+from core.resilience import propose_bess, kva_to_kw, continuity_cashflows
 from core.plots import (irradiance_plot, monthly_demand_vs_solar_bar,
                         gdmto_savings_waterfall, typical_day_profile_plot,
-                        monthly_savings_bar)
+                        monthly_savings_bar, continuity_cashflow_bar)
 
 st.set_page_config(
     page_title="Streger Solar — Análisis CFE",
@@ -598,10 +598,79 @@ st.divider()
 st.markdown("## 📈 Sección 4 — Evaluación financiera de continuidad")
 s4_on = st.checkbox("Análisis avanzado de continuidad", key="s4_enabled")
 if s4_on:
-    if st.session_state.get("bess_proposal") is None:
+    bess = st.session_state.get("bess_proposal")
+    if bess is None:
         st.warning("⚠️ Primero dimensiona el banco de respaldo en la **Sección 3** "
                    "para evaluar el costo-beneficio de la continuidad.")
     else:
-        st.info("🚧 Evaluación financiera en construcción — siguiente etapa del flujo.")
+        fi1, fi2 = st.columns(2)
+        outage_cost = fi1.number_input(
+            "Costo anual histórico por apagones (MXN/año)", min_value=0.0,
+            value=float(st.session_state.get("outage_cost_annual", 0.0)),
+            step=1000.0, format="%.2f",
+            help="Gasto histórico en reparaciones, mermas, producto perdido y paros "
+                 "causados por cortes de CFE. Con respaldo, este costo se evita.",
+        )
+        quote = fi2.number_input(
+            "Cotización comercial de baterías (MXN, opcional)", min_value=0.0,
+            value=float(st.session_state.get("battery_quote_mxn", 0.0)),
+            step=1000.0, format="%.2f",
+            help="Si tienes una cotización real, SUSTITUYE al CAPEX de catálogo "
+                 "en toda esta sección. Deja 0 para usar el catálogo.",
+        )
+        st.session_state["outage_cost_annual"] = float(outage_cost)
+        st.session_state["battery_quote_mxn"] = float(quote)
+
+        fp1, fp2, fp3 = st.columns(3)
+        project_life = fp1.number_input("Vida del proyecto (años)", min_value=5, max_value=25,
+                                        value=10, step=1, key="s4_life")
+        inflation_pct = fp2.number_input("Inflación tarifaria/costos (%/año)", min_value=0.0,
+                                         max_value=15.0, value=5.0, step=0.5, key="s4_infl")
+        discount_pct = fp3.number_input("Tasa de descuento / WACC (%)", min_value=1.0,
+                                        max_value=25.0, value=10.0, step=0.5, key="s4_disc")
+
+        capex_batt = quote if quote > 0 else float(bess["capex_mxn"])
+        capex_src = "cotización comercial" if quote > 0 else "catálogo"
+        ahorro_fv = float(st.session_state.get("ahorro_fv_anual", 0.0))
+        fv_capex = float(st.session_state.get("s2_fv_capex_mxn", 0.0))
+        if ahorro_fv <= 0:
+            st.caption("ℹ️ Sin ahorro tarifario FV registrado — completa la **Sección 2** "
+                       "(paneles > 0 y evaluación económica) para incluirlo en el escenario *Con FV*.")
+
+        # Scenario A: battery + PV → tariff saving + avoided outage losses
+        cf_con = continuity_cashflows(capex_batt + fv_capex, ahorro_fv + outage_cost,
+                                      int(project_life), inflation_pct, discount_pct)
+        # Scenario B: battery only → avoided outage losses
+        cf_sin = continuity_cashflows(capex_batt, outage_cost,
+                                      int(project_life), inflation_pct, discount_pct)
+
+        st.markdown(f"**CAPEX baterías ({capex_src}):** $ {capex_batt:,.2f} MXN · "
+                    f"**CAPEX FV:** $ {fv_capex:,.2f} MXN · "
+                    f"**Beneficio anual:** ahorro FV $ {ahorro_fv:,.2f} + "
+                    f"apagones evitados $ {outage_cost:,.2f}")
+
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        rc1.metric("Payback — Con FV",
+                   f"{cf_con['payback_years']:.1f} años" if cf_con["payback_years"] < 100 else "∞",
+                   help="CAPEX total (batería + FV) / beneficio anual (ahorro FV + apagones evitados).")
+        rc2.metric("VPN — Con FV", f"$ {cf_con['npv_mxn']:,.2f}",
+                   delta="Rentable" if cf_con["npv_mxn"] > 0 else "No rentable",
+                   delta_color="normal" if cf_con["npv_mxn"] > 0 else "inverse")
+        rc3.metric("Payback — Sin FV",
+                   f"{cf_sin['payback_years']:.1f} años" if cf_sin["payback_years"] < 100 else "∞",
+                   help="CAPEX batería / costo anual de apagones evitado.")
+        rc4.metric("VPN — Sin FV", f"$ {cf_sin['npv_mxn']:,.2f}",
+                   delta="Rentable" if cf_sin["npv_mxn"] > 0 else "No rentable",
+                   delta_color="normal" if cf_sin["npv_mxn"] > 0 else "inverse")
+
+        st.plotly_chart(
+            continuity_cashflow_bar(cf_con["months"], cf_con["monthly_pv_flows"],
+                                    cf_sin["monthly_pv_flows"],
+                                    cf_con["cumulative_pv"], cf_sin["cumulative_pv"]),
+            use_container_width=True,
+        )
+        st.caption("Flujos mensuales **a valor presente** (mes 0 = CAPEX inicial negativo). "
+                   "VPN con el mismo patrón de descuento que la optimización de baterías: "
+                   "beneficio·(1+inflación)^(año−1)/(1+descuento)^año.")
 else:
     st.caption("Desbloquea el ROI de la continuidad: costo histórico de apagones vs inversión en respaldo.")
