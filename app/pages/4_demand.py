@@ -24,6 +24,18 @@ st.caption("Genera un perfil típico sintético o sube tu propia curva de carga.
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
+# ── Tarifa CFE activa (elegida en la página principal o en Configuración) ──────
+# Se registra en st.session_state["tariff_mode"] (default GDMTO) y rige toda la
+# lógica de esta página: el precio de exportación por defecto y la franja de
+# baterías se interpretan según la tarifa seleccionada.
+tariff_mode = st.session_state.get("tariff_mode", "GDMTO")
+_tariff_help = {
+    "GDMTO": "Gran Demanda en Media Tensión **Ordinaria** — tarifa plana sin horarios.",
+    "GDMTH": "Gran Demanda en Media Tensión **Horaria** — energía Punta / Intermedia / Base.",
+}
+st.info(f"⚡ Tarifa CFE activa: **{tariff_mode}** — {_tariff_help.get(tariff_mode, '')} "
+        "Cámbiala en la página principal o en **Configuración**.")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # DEMAND PROFILE GENERATOR
 # ─────────────────────────────────────────────────────────────────────────────
@@ -153,8 +165,11 @@ with tab_gen:
 
     # Live profile preview
     arch = _SHAPES[industry]
-    preview_hours = np.arange(24)
-    preview_vals  = np.array(arch["hourly"]) * peak_kw
+    # Repeat hour 0 at hour 24 so the curve connects across midnight: the value
+    # at 24 h must match the value at 0 h (the profile is cyclic day-to-day).
+    _hourly_kw = np.array(arch["hourly"]) * peak_kw
+    preview_hours = np.arange(25)
+    preview_vals  = np.append(_hourly_kw, _hourly_kw[0])
     fig_prev = go.Figure()
     fig_prev.add_trace(go.Scatter(x=preview_hours, y=preview_vals,
                                    mode="lines+markers", line=dict(color="#0039A6", width=2.5),
@@ -162,9 +177,11 @@ with tab_gen:
     fig_prev.add_vrect(x0=18, x1=22, fillcolor="rgba(197,57,41,0.10)", line_width=0,
                         annotation_text="Punta", annotation_position="top left")
     fig_prev.update_layout(template="plotly_white", height=240,
-                            xaxis=dict(title="Hora del día", tickvals=list(range(0, 24, 2))),
+                            xaxis=dict(title="Hora del día", tickvals=list(range(0, 25, 2))),
                             yaxis_title="kW", margin=dict(t=10, b=30),
                             showlegend=False)
+    st.caption(f"Continuidad horaria: 0 h y 24 h coinciden en **{_hourly_kw[0]:.1f} kW** "
+               "(el perfil se repite cíclicamente cada día).")
     chart_with_export(fig_prev, key="dem_preview", filename="perfil_tipico_preview")
 
     st.markdown(f"""
@@ -251,7 +268,34 @@ def align_solar(dem: pd.DataFrame, sol_df: pd.DataFrame) -> pd.Series:
     return s.reindex(dem.index, method="nearest",
                      tolerance=pd.Timedelta("65min")).fillna(0.0)
 
-allow_export = st.toggle("Permitir exportación (venta a red)", value=False)
+st.markdown("### Exportación / inyección a la red")
+with st.expander("ℹ️ Guía: ¿qué pasa con el excedente solar?", expanded=False):
+    st.markdown(
+        f"Cuando la generación FV supera la demanda en un período, el excedente puede:\n\n"
+        f"- **Inyectarse a la red (venta / *net metering*)** — cada kWh exportado se paga a un "
+        f"precio acordado con CFE. Bajo **{tariff_mode}** ese precio suele rondar la tarifa de "
+        f"energía evitada; ajústalo abajo al valor de tu contrato.\n"
+        f"- **Regalarse a la red (gratis)** — si **no tienes baterías** para almacenar el "
+        f"excedente, puedes entregarlo sin compensación: deja el precio en **$0/kWh**.\n"
+        f"- **Recortarse (clip)** — si desactivas la exportación, la demanda neta nunca baja de "
+        f"0 kW y el excedente simplemente se pierde (no se inyecta nada a la red)."
+    )
+
+exp_c1, exp_c2 = st.columns([1, 1])
+allow_export = exp_c1.toggle(
+    "Permitir exportación (inyección a la red)", value=False,
+    help="Si se activa, la demanda neta puede ser negativa (excedente inyectado a la red).",
+)
+# Precio de exportación por defecto según la tarifa CFE activa (energía evitada).
+_default_export_price = 1.32 if tariff_mode == "GDMTO" else 1.48
+export_price = exp_c2.number_input(
+    "Precio por kWh exportado (MXN/kWh)", min_value=0.0, max_value=10.0,
+    value=_default_export_price, step=0.01, format="%.2f", disabled=not allow_export,
+    help=f"Precio de venta de cada kWh inyectado bajo tarifa {tariff_mode}. "
+         "Pon **0** para regalar el excedente a la red (útil si no tienes baterías).",
+)
+st.session_state["export_price_mxn_kwh"] = float(export_price)
+st.session_state["allow_export"] = bool(allow_export)
 
 if df_irr is not None:
     solar_kw = align_solar(demand_df, df_irr)
@@ -268,6 +312,12 @@ st.session_state["net_demand"] = net_kw
 st.markdown("### 🔋 Configuración de baterías (vista previa)")
 st.caption("Elige desde el inicio el modelo y las horas de descarga. Ambos se **heredan** en la "
            "página de **Baterías**, para que veas la opción más conveniente sin volver a capturar nada.")
+if tariff_mode == "GDMTH":
+    st.caption("Bajo **GDMTH** la franja de descarga sirve para **recortar la punta horaria** "
+               "(18–22 h) y evitar la energía Punta, la más cara.")
+else:
+    st.caption("Bajo **GDMTO** (tarifa plana) no hay punta horaria: las baterías se evalúan "
+               "principalmente como **respaldo**; la franja de descarga es indicativa.")
 
 _BATTERIES = load_batteries()
 _bat_labels = [
@@ -317,18 +367,18 @@ net_view = net_kw.loc[mask]
 st.markdown("### Métricas del período seleccionado")
 peak_orig = dem_view.max()
 peak_net  = net_view.max()
-peak_shaving  = (peak_orig - peak_net) / peak_orig * 100 if peak_orig > 0 else 0.0
 total_dem_kwh = float(dem_view.sum())
 total_sol_kwh = float(sol_view.sum())
 self_ratio    = min(total_sol_kwh, total_dem_kwh) / total_sol_kwh * 100 if total_sol_kwh > 0 else 0.0
 surplus_kwh   = max(0.0, total_sol_kwh - total_dem_kwh)
+export_value  = surplus_kwh * export_price if allow_export else 0.0
 
 m1, m2, m3, m4, m5, m6 = st.columns(6)
 custom_metric(m1, "Demanda pico original",  f"{peak_orig:.1f} kW")
 custom_metric(m2, "Demanda pico neta",      f"{peak_net:.1f} kW")
-custom_metric(m3, "Peak shaving",           f"{peak_shaving:.1f} %")
-custom_metric(m4, "Autoconsumo solar",      f"{self_ratio:.1f} %")
-custom_metric(m5, "Excedente FV",           f"{surplus_kwh:.1f} kWh")
+custom_metric(m3, "Autoconsumo solar",      f"{self_ratio:.1f} %")
+custom_metric(m4, "Excedente FV",           f"{surplus_kwh:.1f} kWh")
+custom_metric(m5, "Ingreso exportación",    f"$ {export_value:,.2f}")
 custom_metric(m6, "Reducción energía",
           f"{(total_dem_kwh - float(net_view.sum())) / total_dem_kwh * 100:.1f} %"
           if total_dem_kwh > 0 else "—")
