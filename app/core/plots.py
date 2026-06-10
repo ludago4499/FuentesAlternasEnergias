@@ -327,6 +327,42 @@ def typical_day_profile_plot(
     return fig
 
 
+def residential_blocks_bar(blocks: dict, dac_threshold: float | None = None) -> go.Figure:
+    """Stacked horizontal bar of bimonthly kWh per residential block
+    (Básico → Intermedio → Verano 1 → Verano 2 → Excedente)."""
+    labels = {"basico": "Básico", "intermedio": "Intermedio", "verano1": "Verano 1",
+              "verano2": "Verano 2", "excedente": "Excedente"}
+    colors = {"basico": GREEN, "intermedio": SOLAR_YELLOW, "verano1": SOLAR_ORANGE,
+              "verano2": LIGHT_BLUE, "excedente": RED}
+
+    fig = go.Figure()
+    for key, label in labels.items():
+        kwh = float(blocks.get(key, 0.0))
+        if kwh <= 0:
+            continue
+        fig.add_trace(go.Bar(
+            y=["Consumo"], x=[kwh], name=label, orientation="h",
+            marker_color=colors[key],
+            hovertemplate=f"{label}: %{{x:,.0f}} kWh<extra></extra>",
+        ))
+
+    if dac_threshold is not None:
+        fig.add_vline(x=dac_threshold, line_dash="dash", line_color=RED, line_width=2,
+                      annotation_text=f"Límite DAC {dac_threshold:,.0f} kWh",
+                      annotation_position="top")
+
+    fig.update_layout(
+        barmode="stack",
+        template="plotly_white",
+        height=180,
+        xaxis_title="kWh por bimestre",
+        yaxis=dict(showticklabels=False),
+        legend=dict(orientation="h", y=-0.45),
+        margin=dict(t=30, b=10),
+    )
+    return fig
+
+
 def continuity_cashflow_bar(
     months: list[int],
     flows_con_fv: list[float],

@@ -135,3 +135,11 @@ def test_pages_gdmth_path_reaches_demand_warning(page):
     at.run()
     assert not at.exception
     assert len(at.warning) >= 1       # legacy "carga la demanda" guard
+
+
+def test_config_page_with_residential_tool():
+    at = AppTest.from_file(str(APP_DIR / "pages" / "2_config.py"), default_timeout=60)
+    at.run()
+    assert not at.exception
+    # Residential expander defaults: 900 kWh on 1C → within DAC limit (1,700)
+    assert any("DAC" in s.value for s in at.success)
