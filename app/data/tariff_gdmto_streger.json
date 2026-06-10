@@ -1,0 +1,16 @@
+{
+  "name": "GDMTO Streger Coatepec (Mayo 2026)",
+  "fixed_mxn_month": 648.84,
+  "energy_mxn_kwh": {
+    "energia": 1.120709,
+    "transmision": 0.180101,
+    "cenace": 0.007600,
+    "scnmem": 0.006900
+  },
+  "demand_mxn_kw_month": {
+    "capacidad": 86.80463,
+    "distribucion": 60.86863
+  },
+  "bt_loss_pct": 2.0,
+  "iva_pct": 16.0
+}
