@@ -120,7 +120,7 @@ def test_gdmth_mode_stops_main_flow():
     assert all(t.label != "Ingresar mi consumo CFE" for t in at.toggle)
 
 
-@pytest.mark.parametrize("page", ["5_economics.py", "6_baterias.py"])
+@pytest.mark.parametrize("page", ["5_economics GDMTH.py", "6_baterias.py"])
 def test_pages_warn_and_stop_under_gdmto(page):
     at = AppTest.from_file(str(APP_DIR / "pages" / page), default_timeout=60)
     at.run()
@@ -128,7 +128,7 @@ def test_pages_warn_and_stop_under_gdmto(page):
     assert len(at.info) >= 1          # the GDMTO redirect notice
 
 
-@pytest.mark.parametrize("page", ["5_economics.py", "6_baterias.py"])
+@pytest.mark.parametrize("page", ["5_economics GDMTH.py", "6_baterias.py"])
 def test_pages_gdmth_path_reaches_demand_warning(page):
     at = AppTest.from_file(str(APP_DIR / "pages" / page), default_timeout=60)
     at.session_state["tariff_mode"] = "GDMTH"
