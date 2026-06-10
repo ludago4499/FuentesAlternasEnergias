@@ -614,7 +614,9 @@ def irradiance_comparison_plot(
     """
     Overlay actual vs. clear-sky irradiance for a selected day or the full range.
     Top panel: GHI; Bottom panel: POA Global.
-    The area between the two curves is shaded to highlight cloud attenuation.
+    The real measured curve is the solid, opaque blue line filled down to the
+    x-axis; the clear-sky ideal is a thin dotted reference above it. Real data is
+    kept solid (not dotted) because the many spikes make dotted lines unreadable.
     """
     fig = make_subplots(
         rows=2, cols=1, shared_xaxes=True,
@@ -630,20 +632,21 @@ def irradiance_comparison_plot(
         act = df_actual
         cs = df_clearsky
 
-    # GHI
+    # GHI — clear-sky drawn first as a thin dotted reference; real on top as the
+    # solid, opaque blue curve filled down to the x-axis.
     fig.add_trace(go.Scatter(x=cs.index, y=cs["ghi"], name="GHI despejado",
-                             line=dict(color=TEC_BLUE, width=2)), row=1, col=1)
+                             line=dict(color=SOLAR_ORANGE, width=1.5, dash="dot")), row=1, col=1)
     fig.add_trace(go.Scatter(x=act.index, y=act["ghi"], name="GHI real",
-                             line=dict(color=SOLAR_YELLOW, width=2, dash="dot"),
-                             fill="tonexty", fillcolor="rgba(255,179,0,0.18)"), row=1, col=1)
+                             line=dict(color=TEC_BLUE, width=2.2),
+                             fill="tozeroy", fillcolor="rgba(0,57,166,0.28)"), row=1, col=1)
 
-    # POA — clear-sky solid, real always dotted
+    # POA — same convention: dotted clear-sky reference, solid filled real curve.
     fig.add_trace(go.Scatter(x=cs.index, y=cs["poa_global"], name="POA despejado",
-                             line=dict(color=TEC_BLUE, width=2),
+                             line=dict(color=SOLAR_ORANGE, width=1.5, dash="dot"),
                              showlegend=False), row=2, col=1)
     fig.add_trace(go.Scatter(x=act.index, y=act["poa_global"], name="POA real",
-                             line=dict(color=SOLAR_ORANGE, width=2, dash="dot"),
-                             fill="tonexty", fillcolor="rgba(245,124,0,0.18)",
+                             line=dict(color=TEC_BLUE, width=2.2),
+                             fill="tozeroy", fillcolor="rgba(0,57,166,0.28)",
                              showlegend=False), row=2, col=1)
 
     fig.update_layout(
