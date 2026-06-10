@@ -17,7 +17,7 @@ st.markdown("""
 <style>
     /* Banner del equipo */
     .team-banner {
-        background: linear-gradient(135deg, #0039A6 0%, #001f5c 100%);
+        background: linear-gradient(135deg, #F5F0E1 0%, #FFD400 100%);
         padding: 2.5rem;
         border-radius: 12px;
         color: white;
@@ -114,7 +114,7 @@ ROLE_CSS = {
 st.markdown(f"""
 <div class="team-banner">
     <h1 style="color: white !important; margin: 0; font-weight: 800; font-size: 3em;">Equipo {TEAM_NUMBER}</h1>
-    <p style="font-size: 1.2em; color: #E0E0E0; margin-top: 5px;">Proyecto: Análisis Económico Solar GDMTH — Tecnológico de Monterrey</p>
+    <p style="font-size: 1.2em; color: #ffffff; margin-top: 5px;">Proyecto: Análisis Económico Solar GDMTH — Tecnológico de Monterrey</p>
 </div>
 """, unsafe_allow_html=True)
 
