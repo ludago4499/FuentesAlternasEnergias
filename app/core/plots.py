@@ -220,6 +220,113 @@ def monthly_savings_bar(monthly_results: list[dict]) -> go.Figure:
     return fig
 
 
+# ── GDMTO (flat tariff) builders ─────────────────────────────────────────────
+
+def monthly_demand_vs_solar_bar(
+    month_labels: list[str],
+    demand_kwh: list[float],
+    solar_kwh: list[float],
+) -> go.Figure:
+    """Grouped monthly bars: CFE demand (kWh) vs real PV generation (kWh)."""
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        name="Demanda (kWh)", x=month_labels, y=list(demand_kwh),
+        marker_color=TEC_BLUE,
+        hovertemplate="%{x}: %{y:,.0f} kWh<extra>Demanda</extra>",
+    ))
+    fig.add_trace(go.Bar(
+        name="Generación Real (kWh)", x=month_labels, y=list(solar_kwh),
+        marker_color=SOLAR_YELLOW, marker_line_color=SOLAR_ORANGE, marker_line_width=1,
+        hovertemplate="%{x}: %{y:,.0f} kWh<extra>Generación FV</extra>",
+    ))
+    fig.update_layout(
+        barmode="group",
+        template="plotly_white",
+        yaxis_title="Energía (kWh / mes)",
+        height=380,
+        legend=dict(orientation="h", y=-0.15),
+        margin=dict(t=10, b=60),
+        hovermode="x unified",
+    )
+    return fig
+
+
+def gdmto_savings_waterfall(bill: dict) -> go.Figure:
+    """
+    Waterfall from the original GDMTO bill (no solar) to the bill with PV,
+    splitting the saving into energy, demand, 2% BT, FP and IVA components.
+    Expects a bill dict from GDMTOCalculator.compute_bill.
+    """
+    e_saving = bill["orig_energy_total_mxn"] - bill["energy_total_mxn"]
+    d_saving = bill["orig_demand_total_mxn"] - bill["demand_total_mxn"]
+    bt_saving = bill["orig_bt_charge_mxn"] - bill["bt_charge_mxn"]
+    fp_saving = bill["orig_fp_charge_mxn"] - bill["fp_charge_mxn"]
+    iva_saving = bill["orig_iva_mxn"] - bill["iva_mxn"]
+
+    categories = ["Factura sin FV", "Ahorro energía", "Ahorro demanda",
+                  "Ahorro 2% BT", "Ahorro FP", "Ahorro IVA", "Factura con FV"]
+    measure = ["absolute", "relative", "relative", "relative", "relative", "relative", "total"]
+    y = [bill["orig_total_mxn"], -e_saving, -d_saving, -bt_saving, -fp_saving,
+         -iva_saving, bill["total_mxn"]]
+
+    fig = go.Figure(go.Waterfall(
+        name="GDMTO",
+        orientation="v",
+        measure=measure,
+        x=categories,
+        y=y,
+        text=[f"${v:,.0f}" for v in y],
+        textposition="outside",
+        decreasing={"marker": {"color": GREEN}},
+        increasing={"marker": {"color": RED}},
+        totals={"marker": {"color": TEC_BLUE}},
+        connector={"line": {"color": "gray", "width": 1}},
+    ))
+    fig.update_layout(
+        template="plotly_white",
+        yaxis_title="MXN / mes",
+        height=420,
+        margin=dict(t=20, b=80),
+        showlegend=False,
+        xaxis_tickangle=-20,
+    )
+    return fig
+
+
+def typical_day_profile_plot(
+    demand_kw_24: list[float],
+    solar_kw_24: list[float],
+    month_label: str = "",
+) -> go.Figure:
+    """Typical-day (24 h) demand vs PV profile for one month — no CFE period
+    bands because GDMTO has no hourly periods."""
+    hours = list(range(24))
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=hours, y=list(demand_kw_24), name="Demanda (kW)",
+        line=dict(color=RED, width=2.2),
+        hovertemplate="%{x}:00 — %{y:.1f} kW<extra>Demanda</extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=hours, y=list(solar_kw_24), name="Generación FV (kW)",
+        line=dict(color=SOLAR_YELLOW, width=2),
+        fill="tozeroy", fillcolor="rgba(255,179,0,0.18)",
+        hovertemplate="%{x}:00 — %{y:.1f} kW<extra>FV</extra>",
+    ))
+    fig.update_layout(
+        template="plotly_white",
+        height=340,
+        xaxis=dict(title="Hora del día", tickvals=list(range(0, 24, 2))),
+        yaxis_title="Potencia (kW)",
+        title=dict(text=f"Día típico — {month_label}" if month_label else None,
+                   font=dict(size=14)),
+        legend=dict(orientation="h", y=-0.2),
+        hovermode="x unified",
+        margin=dict(t=40, b=50),
+    )
+    return fig
+
+
 def battery_dispatch_plot(
     demand_kw: pd.Series,
     solar_kw: pd.Series,

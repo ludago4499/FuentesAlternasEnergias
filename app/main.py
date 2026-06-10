@@ -24,7 +24,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 from core.jensen import run_jensen_model, compute_pv_generation, energy_kwh, peak_sun_hours
-from core.plots import irradiance_plot
+from core.gdmto import GDMTOCalculator, MONTH_ABBR_ES
+from core.plots import (irradiance_plot, monthly_demand_vs_solar_bar,
+                        gdmto_savings_waterfall, typical_day_profile_plot,
+                        monthly_savings_bar)
 
 st.set_page_config(
     page_title="Streger Solar — Análisis CFE",
@@ -155,7 +158,8 @@ with st.sidebar:
     cs1.metric("Ciudad", st.session_state.get("city", "—").split(",")[0])
     cs2.metric("Modo", st.session_state.get("tariff_mode", "GDMTO"))
     cs3, cs4 = st.columns(2)
-    cs3.metric("Sistema (kWp)", f"{st.session_state.get('system_kwp', 0.0):.1f}")
+    _kwp = st.session_state.get("s2_system_kwp") or st.session_state.get("system_kwp", 0.0)
+    cs3.metric("Sistema (kWp)", f"{_kwp:.1f}")
     cs4.metric("Respaldo (h)", st.session_state.get("backup_hours", 0))
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -273,8 +277,234 @@ s2_on = st.toggle(
     key="s2_enabled",
     help="Captura tu historial de recibos GDMTO para comparar contra la generación solar.",
 )
+# Reference 24-h industrial shape (manufactura archetype, mirrors 4_demand) used
+# only to draw hourly profiles; billing always uses the user-entered demanda_kw.
+_DAY_SHAPE = np.array([0.42, 0.40, 0.39, 0.38, 0.39, 0.43,
+                       0.65, 0.82, 0.95, 0.98, 1.00, 0.99,
+                       0.97, 0.96, 0.97, 0.96, 0.95, 0.96,
+                       0.98, 1.00, 0.99, 0.95, 0.80, 0.55])
+_DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]  # 2024 (solar year)
+_SOLAR_YEAR = ("2024-01-01", "2024-12-31")
+
+
+@st.cache_data(show_spinner="Calculando generación solar del año completo…")
+def _year_pv_monthly(lat: float, lon: float, tilt: float, az_pvlib: float, tz: str,
+                     altitude: float, panel_id: str, n_panels: int):
+    """Hourly year with AR(1) cloud variability (fixed seed → reproducible)
+    → (monthly kWh ×12, mean-day kW profile 12×24, annual kWh)."""
+    panel = next(p for p in PANELS if p["id"] == panel_id)
+    df = run_jensen_model(
+        lat=lat, lon=lon, tilt=tilt, azimuth=az_pvlib,
+        start_date=_SOLAR_YEAR[0], end_date=_SOLAR_YEAR[1],
+        tz=tz, altitude=altitude, freq="h",
+        weather_source="stochastic", stochastic_seed=42,
+    )
+    pv_kw = compute_pv_generation(
+        df,
+        system_kwp=n_panels * panel["wp"] / 1000.0,
+        panel_efficiency=panel["efficiency_pct"],
+        panel_wp=panel["wp"],
+        panel_area_m2=panel.get("area_m2"),
+        n_panels=n_panels,
+        temp_coeff_pmax=panel.get("temp_coeff_pmax", -0.30),
+        noct=panel.get("noct", 43),
+    )
+    monthly = pv_kw.groupby(pv_kw.index.month).sum()              # dt = 1 h → kWh
+    monthly_kwh = [float(monthly.get(m, 0.0)) for m in range(1, 13)]
+    prof = pv_kw.groupby([pv_kw.index.month, pv_kw.index.hour]).mean().unstack(fill_value=0.0)
+    prof = prof.reindex(index=range(1, 13), columns=range(24), fill_value=0.0)
+    return monthly_kwh, prof.values, float(pv_kw.sum())
+
+
 if s2_on:
-    st.info("🚧 Captura de consumo en construcción — se habilita en la siguiente etapa del flujo.")
+    # ── A) Historial CFE ──────────────────────────────────────────────────────
+    input_mode = st.radio("Modo de captura", ["Promedio mensual", "Tabla de 12 meses"],
+                          horizontal=True, key="s2_input_mode")
+
+    if input_mode == "Promedio mensual":
+        ca1, ca2, ca3, ca4 = st.columns(4)
+        kwh_avg = ca1.number_input("Consumo mensual (kWh)", min_value=0.0,
+                                   value=9520.0, step=100.0, format="%.0f")
+        kw_avg = ca2.number_input("Demanda máxima (kW)", min_value=0.0,
+                                  value=80.0, step=1.0, format="%.1f")
+        fp_avg = ca3.number_input("Factor de potencia (%)", min_value=50.0, max_value=100.0,
+                                  value=89.89, step=0.01, format="%.2f")
+        costo_avg = ca4.number_input("Costo medio del recibo ($/kWh)", min_value=0.0,
+                                     value=2.67, step=0.01, format="%.2f")
+        cfe_history = pd.DataFrame({
+            "mes": MONTH_ABBR_ES,
+            "kwh": [kwh_avg] * 12,
+            "demanda_kw": [kw_avg] * 12,
+            "costo_medio_mxn_kwh": [costo_avg] * 12,
+            "fp_pct": [fp_avg] * 12,
+        })
+    else:
+        st.caption("Edita los valores de cada recibo. La plantilla trae los valores del recibo "
+                   "Streger de Mayo 2026 (9,520 kWh · 80 kW · $2.67/kWh · FP 89.89%).")
+        _template = pd.DataFrame({
+            "mes": MONTH_ABBR_ES,
+            "kwh": [9520.0] * 12,
+            "demanda_kw": [80.0] * 12,
+            "costo_medio_mxn_kwh": [2.67] * 12,
+            "fp_pct": [89.89] * 12,
+        })
+        cfe_history = st.data_editor(
+            _template,
+            hide_index=True,
+            num_rows="fixed",
+            use_container_width=True,
+            key="s2_cfe_editor",
+            column_config={
+                "mes": st.column_config.TextColumn("Mes", disabled=True),
+                "kwh": st.column_config.NumberColumn("Consumo (kWh)", min_value=0.0, format="%.0f"),
+                "demanda_kw": st.column_config.NumberColumn("Demanda (kW)", min_value=0.0, format="%.1f"),
+                "costo_medio_mxn_kwh": st.column_config.NumberColumn("Costo medio ($/kWh)",
+                                                                     min_value=0.0, format="%.2f"),
+                "fp_pct": st.column_config.NumberColumn("FP (%)", min_value=0.0,
+                                                        max_value=100.0, format="%.2f"),
+            },
+        )
+        cfe_history = cfe_history.fillna(0.0)
+
+    st.session_state["cfe_history"] = cfe_history
+
+    # ── B) Sistema fotovoltaico propuesto ─────────────────────────────────────
+    st.markdown("#### 🔆 Sistema fotovoltaico propuesto")
+    cb1, cb2 = st.columns([2, 1])
+    _panel_labels = [f"{p['brand']} {p['model']} — {p['wp']} Wp | {p['efficiency_pct']}% | "
+                     f"${p['usd_per_w']}/W" for p in PANELS]
+    s2_panel_idx = cb1.selectbox("Panel fotovoltaico", range(len(PANELS)),
+                                 format_func=lambda i: _panel_labels[i], key="s2_panel_idx")
+    s2_panel = PANELS[s2_panel_idx]
+    s2_n_panels = cb2.number_input("Número de paneles", min_value=0, max_value=5000,
+                                   value=0, step=1, key="s2_n_panels_input")
+    s2_kwp = s2_n_panels * s2_panel["wp"] / 1000.0
+    usd_mxn = st.session_state.get("usd_mxn", 17.5)
+    s2_fv_capex_mxn = s2_n_panels * s2_panel["wp"] * s2_panel["usd_per_w"] * usd_mxn
+    st.caption(f"**Sistema:** {s2_kwp:.2f} kWp · **CAPEX paneles:** $ {s2_fv_capex_mxn:,.2f} MXN "
+               f"(TDC {usd_mxn:.2f})")
+
+    st.session_state.update({
+        "s2_panel": s2_panel,
+        "s2_system_kwp": s2_kwp,
+        "s2_fv_capex_mxn": s2_fv_capex_mxn,
+    })
+
+    if s2_n_panels > 0:
+        gen_monthly, gen_profile, gen_annual = _year_pv_monthly(
+            float(lat), float(lon), float(tilt), azimuth_pvlib, tz, float(_alt_d),
+            s2_panel["id"], int(s2_n_panels),
+        )
+    else:
+        gen_monthly, gen_profile, gen_annual = [0.0] * 12, np.zeros((12, 24)), 0.0
+        st.info("💡 Ingresa un número de paneles mayor a 0 para ver la generación solar.")
+
+    # ── C) Balance mensual demanda vs generación ──────────────────────────────
+    demand_monthly = [float(v) for v in cfe_history["kwh"].tolist()]
+    total_dem = sum(demand_monthly)
+    total_gen = sum(gen_monthly)
+    coverage = (sum(min(d, g) for d, g in zip(demand_monthly, gen_monthly)) / total_dem * 100.0
+                if total_dem > 0 else 0.0)
+
+    st.markdown("#### ⚖️ Balance mensual: demanda vs generación")
+    st.caption("Generación *real*: modelo horario Jensen con nubosidad estocástica AR(1) "
+               "(semilla fija) y derating por temperatura NOCT.")
+    st.plotly_chart(monthly_demand_vs_solar_bar(MONTH_ABBR_ES, demand_monthly, gen_monthly),
+                    use_container_width=True)
+    bal1, bal2, bal3 = st.columns(3)
+    bal1.metric("Demanda anual", f"{total_dem:,.0f} kWh")
+    bal2.metric("Generación FV anual", f"{total_gen:,.0f} kWh")
+    bal3.metric("Balance anual neto", f"{total_dem - total_gen:,.0f} kWh",
+                delta=f"FV cubre {coverage:.1f}% del consumo",
+                help="Positivo: consumo no cubierto por FV. Negativo: excedente anual.")
+
+    with st.expander("📈 Ver perfil horario típico (demanda vs solar)"):
+        sel_mes = st.selectbox("Mes", MONTH_ABBR_ES, key="s2_mes_perfil")
+        m_idx = MONTH_ABBR_ES.index(sel_mes)
+        kwh_m = demand_monthly[m_idx]
+        shape_day_kwh = float(_DAY_SHAPE.sum())
+        scale = kwh_m / (shape_day_kwh * _DAYS_IN_MONTH[m_idx]) if shape_day_kwh > 0 else 0.0
+        demand_24 = (_DAY_SHAPE * scale).tolist()
+        st.plotly_chart(typical_day_profile_plot(demand_24, gen_profile[m_idx].tolist(),
+                                                 month_label=sel_mes),
+                        use_container_width=True)
+        st.caption("Perfil sintético (arquetipo industrial) escalado para que el mes sume "
+                   f"{kwh_m:,.0f} kWh. La **demanda facturable** es la capturada en tu recibo "
+                   f"({float(cfe_history['demanda_kw'].iloc[m_idx]):,.1f} kW), no el pico del perfil.")
+
+    # ── D) Evaluación económica: Express o desglose formal ────────────────────
+    st.markdown("#### 💰 Evaluación económica")
+    eval_mode = st.radio("Tipo de evaluación", ["Módulo Express", "Desglose formal GDMTO"],
+                         horizontal=True, key="s2_eval_mode",
+                         help="Express: estimación inmediata con tu costo medio por kWh. "
+                              "Desglose formal: factura GDMTO completa (energía, demanda, 2% BT, FP, IVA).")
+
+    ahorro_fv_anual = 0.0
+    if eval_mode == "Módulo Express":
+        use_costo = st.checkbox("¿Deseas ingresar el costo promedio por kWh de tu recibo?",
+                                value=True, key="s2_express_on")
+        if use_costo:
+            costo_kwh = st.number_input("Costo promedio ($/kWh)", min_value=0.0,
+                                        value=float(st.session_state.get("costo_promedio_kwh", 2.67)),
+                                        step=0.01, format="%.2f", key="s2_costo_kwh")
+            st.session_state["costo_promedio_kwh"] = float(costo_kwh)
+            pago_actual = sum(k * costo_kwh for k in demand_monthly)
+            pago_con_fv = sum(max(k - g, 0.0) * costo_kwh
+                              for k, g in zip(demand_monthly, gen_monthly))
+            ahorro_fv_anual = pago_actual - pago_con_fv
+            ex1, ex2 = st.columns(2)
+            ex1.metric("Pago anual actual", f"$ {pago_actual:,.2f}")
+            ex2.metric("Pago anual con FV", f"$ {pago_con_fv:,.2f}",
+                       delta=f"-$ {ahorro_fv_anual:,.2f}", delta_color="inverse")
+            st.caption("Estimación rápida: Σ kWh × costo medio — no requiere el motor tarifario.")
+    else:
+        dr_pct = st.slider("Reducción de demanda facturable por FV (%)", 0, 30, 0,
+                           key="s2_dr_pct",
+                           help="En GDMTO el FV normalmente NO reduce la demanda máxima "
+                                "(suele ocurrir fuera de horas solares). Ajusta sólo si tienes "
+                                "evidencia de coincidencia pico-sol.")
+        calc_gdmto = GDMTOCalculator()
+        proj = calc_gdmto.annual_projection(
+            cfe_history.to_dict("records"), gen_monthly, demand_reduction_pct=float(dr_pct),
+        )
+        annual = proj["annual"]
+        ahorro_fv_anual = annual["savings_mxn"]
+
+        fa1, fa2, fa3, fa4 = st.columns(4)
+        fa1.metric("Factura anual sin FV", f"$ {annual['orig_total_mxn']:,.2f}")
+        fa2.metric("Factura anual con FV", f"$ {annual['total_mxn']:,.2f}")
+        fa3.metric("Ahorro anual", f"$ {annual['savings_mxn']:,.2f}",
+                   delta=f"{annual['savings_mxn'] / annual['orig_total_mxn'] * 100:.1f}%"
+                   if annual["orig_total_mxn"] > 0 else None)
+        fa4.metric("Tarifa", calc_gdmto.name, help="Componentes calibrados al recibo real.")
+
+        st.plotly_chart(monthly_savings_bar(proj["monthly"]), use_container_width=True)
+
+        sel_mes_wf = st.selectbox("Mes para el desglose en cascada", MONTH_ABBR_ES,
+                                  index=4, key="s2_mes_waterfall")
+        bill_sel = proj["monthly"][MONTH_ABBR_ES.index(sel_mes_wf)]
+        st.plotly_chart(gdmto_savings_waterfall(bill_sel), use_container_width=True)
+
+        with st.expander("📄 Ver componentes de la factura por mes"):
+            rows = []
+            for b in proj["monthly"]:
+                rows.append({
+                    "Mes": MONTH_ABBR_ES[b["month"] - 1],
+                    "kWh neto": f"{b['net_kwh']:,.0f}",
+                    "Fijo": f"$ {b['fixed_mxn']:,.2f}",
+                    "Energía": f"$ {b['energy_total_mxn']:,.2f}",
+                    "Demanda": f"$ {b['demand_total_mxn']:,.2f}",
+                    "2% BT": f"$ {b['bt_charge_mxn']:,.2f}",
+                    "FP": f"$ {b['fp_charge_mxn']:,.2f}",
+                    "IVA": f"$ {b['iva_mxn']:,.2f}",
+                    "Total": f"$ {b['total_mxn']:,.2f}",
+                    "Total sin FV": f"$ {b['orig_total_mxn']:,.2f}",
+                    "Ahorro": f"$ {b['savings_mxn']:,.2f}",
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    st.session_state["ahorro_fv_anual"] = float(ahorro_fv_anual)
+    st.session_state["s2_gen_monthly"] = gen_monthly
 else:
     st.caption("Activa esta sección para capturar tus recibos y ver el balance demanda vs generación.")
 
