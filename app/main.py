@@ -523,6 +523,7 @@ if s3_on:
     backup_hours = st.slider(
         "Horas de respaldo requeridas", min_value=1, max_value=24,
         value=max(int(st.session_state.get("backup_hours", 0)) or 4, 1),
+        key="s3_hours",
         help="Duración del apagón que el banco de baterías debe cubrir alimentando la carga crítica.",
     )
     st.session_state["backup_hours"] = int(backup_hours)
@@ -530,6 +531,7 @@ if s3_on:
     cl1, cl2, cl3 = st.columns([2, 1, 1])
     load_val = cl1.number_input(
         "Carga crítica a respaldar", min_value=0.0, value=20.0, step=1.0, format="%.1f",
+        key="s3_load",
         help="Equipos que DEBEN seguir operando durante el apagón (refrigeración, "
              "servidores, bombas, iluminación de seguridad…).",
     )
@@ -607,14 +609,14 @@ if s4_on:
         outage_cost = fi1.number_input(
             "Costo anual histórico por apagones (MXN/año)", min_value=0.0,
             value=float(st.session_state.get("outage_cost_annual", 0.0)),
-            step=1000.0, format="%.2f",
+            step=1000.0, format="%.2f", key="s4_outage",
             help="Gasto histórico en reparaciones, mermas, producto perdido y paros "
                  "causados por cortes de CFE. Con respaldo, este costo se evita.",
         )
         quote = fi2.number_input(
             "Cotización comercial de baterías (MXN, opcional)", min_value=0.0,
             value=float(st.session_state.get("battery_quote_mxn", 0.0)),
-            step=1000.0, format="%.2f",
+            step=1000.0, format="%.2f", key="s4_quote",
             help="Si tienes una cotización real, SUSTITUYE al CAPEX de catálogo "
                  "en toda esta sección. Deja 0 para usar el catálogo.",
         )
