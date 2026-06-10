@@ -1,463 +1,269 @@
+"""
+Streger Solar — Evaluación Financiera de Continuidad de Negocio (Sección 4)
+Tecnológico de Monterrey
+
+Página independiente del flujo GDMTH. Sustituye a la antigua página de
+"Economía GDMTH" conservando su posición en el menú lateral (mismo nombre de
+archivo: 5_economics.py).
+
+No modifica ni depende de ningún otro archivo: sólo LEE de `st.session_state`,
+que es alimentado por las demás secciones:
+  • Cotización de baterías  → Sección 3 (bess_proposal) y/o página 🔋 Baterías
+                              (battery_capex_usd / use_battery).
+  • Costo de apagones        → input manual de esta página (outage_cost_annual).
+  • Ahorro FV y CAPEX FV     → Sección 2 (ahorro_fv_anual / s2_fv_capex_mxn),
+                              opcionales: si existen, se evalúa el escenario
+                              "con paneles".
+
+OBJETIVO (Sección 4):
+  INPUT  — Monto anual histórico gastado en reparaciones por apagones (manual).
+  INPUT  — Cotización comercial de baterías (desde la sección de baterías).
+  OUTPUT — ROI basado en pérdidas operativas evitadas (costo de la inacción),
+           VPN, payback y simulación de cashflow mensual CON y SIN paneles.
+"""
+
 import sys
 from pathlib import Path
-import io
-import datetime
 
 import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from core.gdmth import GDMTHCalculator, classify_period, get_season
-from core.plots import savings_waterfall, energy_pie, monthly_savings_bar
+from core.resilience import continuity_cashflows
+from core.plots import continuity_cashflow_bar
 from core.exporting import chart_with_export
+from core.state import keep_state
 
-st.set_page_config(page_title="Economía GDMTH — Solar", page_icon="💰", layout="wide")
+st.set_page_config(page_title="Continuidad de Negocio — ROI", page_icon="📈", layout="wide")
+keep_state()
 
-# ── CSS MEJORADO (Banner y Títulos) ──────────────────────────────────────────
+# ── Estilos ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .econ-banner {
-        background: linear-gradient(135deg, #0039A6 0%, #00B4D8 100%);
-        padding: 2rem;
-        border-radius: 12px;
-        color: white;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    h1 { color: #0039A6 !important; font-weight: 800 !important; }
+    h3, h4 { color: #0039A6 !important; }
+    .cont-banner {
+        background: linear-gradient(135deg, #0039A6 0%, #C62828 100%);
+        padding: 1.6rem 2rem; border-radius: 12px; color: white;
+        margin-bottom: 1.2rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    .econ-banner h1 {
-        color: white !important;
-        margin: 0;
-        font-weight: 800;
-        font-size: 2.5em;
-    }
-    .econ-banner p {
-        font-size: 1.1em;
-        color: #E0F7FA;
-        margin-top: 5px;
-        margin-bottom: 0;
-    }
-    .section-title {
-        color: #0039A6;
-        margin-top: 0;
-        margin-bottom: 1rem;
-        font-weight: 600;
-    }
+    .cont-banner h1 { color: white !important; margin: 0; font-size: 2.2em; }
+    .cont-banner p { color: #FFE0E0; margin: 6px 0 0 0; font-size: 1.05em; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── ENCABEZADO ────────────────────────────────────────────────────────────────
 st.markdown("""
-<div class="econ-banner">
-    <h1>💰 Análisis Económico GDMTH</h1>
-    <p>Desglose de cargos tarifarios, flujo de efectivo y retorno de inversión del sistema fotovoltaico.</p>
+<div class="cont-banner">
+    <h1>📈 Evaluación Financiera de Continuidad de Negocio</h1>
+    <p>ROI del respaldo ante apagones: cuánto cuesta NO invertir (costo de la inacción)
+    frente a la inversión en baterías. Simulación de cashflow con y sin paneles.</p>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Tariff-mode branch: this page is the GDMTH flow ───────────────────────────
-if st.session_state.get("tariff_mode", "GDMTO") == "GDMTO":
-    st.info(
-        "🔀 Modo tarifario actual: **GDMTO** (tarifas planas). Esta página calcula facturas "
-        "**GDMTH** (tarifa horaria). El análisis económico GDMTO está en la página **principal** "
-        "(Sección 2 — Tu consumo CFE). Cambia el modo a GDMTH en ⚙️ **Configuración** "
-        "si tu suministro es horario."
-    )
-    st.stop()
 
-# ── Check prerequisites ───────────────────────────────────────────────────────
-region = st.session_state.get("region", "Noreste")
+# ── Helper: ROI nominal por pérdidas evitadas ─────────────────────────────────
+def _roi_total_continuidad(capex_mxn: float, annual_benefit_mxn: float,
+                           project_life: int, inflation_pct: float) -> float:
+    """
+    ROI total (%) = (beneficios nominales acumulados − CAPEX) / CAPEX × 100.
+
+    El beneficio anual (pérdidas evitadas + ahorro FV) crece con la inflación de
+    costos año con año. Es un ROI nominal; el descuento se maneja aparte en el VPN.
+    'Basado en pérdidas evitadas' = el beneficio es el costo de los apagones que se
+    deja de pagar.
+    """
+    if capex_mxn <= 0:
+        return float("nan")
+    infl = inflation_pct / 100.0
+    total_benefit = sum(annual_benefit_mxn * ((1 + infl) ** (yr - 1))
+                        for yr in range(1, project_life + 1))
+    return (total_benefit - capex_mxn) / capex_mxn * 100.0
+
+
+# ── Resolver la cotización de baterías DESDE la sección de baterías ───────────
 usd_mxn = st.session_state.get("usd_mxn", 17.5)
-system_kwp = st.session_state.get("system_kwp", 50.0)
-panel_capex_usd = st.session_state.get("panel_capex_usd", 0.0)
-panel = st.session_state.get("panel", {})
+_bess = st.session_state.get("bess_proposal")              # Sección 3 (resiliencia GDMTO)
+_bat_page_usd = st.session_state.get("battery_capex_usd")  # página 🔋 Baterías (flujo GDMTH)
+_use_bat_page = st.session_state.get("use_battery", False)
 
-demand_df = st.session_state.get("demand_df")
-solar_kw = st.session_state.get("solar_aligned")
-net_demand = st.session_state.get("net_demand")
+_quote_sources = []   # lista de (etiqueta, capex_mxn, detalle)
+if _bat_page_usd and _use_bat_page:
+    _b = st.session_state.get("battery", {})
+    _u = st.session_state.get("battery_units", 0)
+    _cfg = st.session_state.get("battery_cfg", {})
+    _quote_sources.append((
+        "Página 🔋 Baterías (arreglo configurado)",
+        float(_bat_page_usd) * usd_mxn,
+        f"{_u} × {_b.get('brand', '')} {_b.get('model', '')} · "
+        f"{_cfg.get('capacity_kwh', 0):,.0f} kWh útil",
+    ))
+if _bess is not None:
+    _quote_sources.append((
+        "Sección 3 — Resiliencia (dimensionamiento automático)",
+        float(_bess["capex_mxn"]),
+        f"{_bess.get('units', '?')} × {_bess.get('brand', '')} {_bess.get('model', '')} · "
+        f"{_bess.get('total_usable_kwh', 0):,.1f} kWh útil",
+    ))
 
-# ── Battery (from the Baterías page, if configured) ───────────────────────────
-use_battery = st.session_state.get("use_battery", False)
-battery_cfg = st.session_state.get("battery_cfg")
-battery_unit = st.session_state.get("battery", {})
-battery_units = st.session_state.get("battery_units", 0)
-bat_capex_usd = st.session_state.get("battery_capex_usd", 0.0) if (use_battery and battery_cfg) else 0.0
-
-# ── Sidebar settings ──────────────────────────────────────────────────────────
-st.sidebar.markdown("### ⚙️ Parámetros Financieros")
-if use_battery and battery_cfg:
-    st.sidebar.success(
-        f"🔋 Batería activa: {battery_units} × {battery_unit.get('brand','')} "
-        f"{battery_unit.get('model','')} ({battery_cfg['capacity_kwh']:,.0f} kWh)"
+# ── Prerrequisito: necesita una cotización de baterías ────────────────────────
+if not _quote_sources:
+    st.warning(
+        "⚠️ No hay **cotización de baterías** disponible todavía. Dimensiona el banco de "
+        "respaldo en la **Sección 3 — Resiliencia** de la página principal (o configura un "
+        "arreglo en la página **🔋 Baterías** del modo GDMTH). La cotización se trae "
+        "automáticamente aquí, no necesitas capturarla a mano."
     )
-else:
-    st.sidebar.info("🔋 Sin batería. Configúrala en la página **Baterías** para incluirla aquí.")
-install_factor = st.sidebar.slider("Factor de instalación (% sobre equipos)", 10, 40, 20, help="Cubre estructura, cableado, inversores y mano de obra.")
-opex_pct = st.sidebar.slider("OPEX anual (% del CAPEX total)", 1, 5, 2, help="Mantenimiento, limpieza de paneles y seguros.")
-inflation_pct = st.sidebar.slider("Inflación tarifaria CFE anual (%)", 0.0, 15.0, 5.0, step=0.5)
-project_life = st.sidebar.slider("Vida útil del proyecto (años)", 10, 30, 25)
-
-# ── CAPEX summary ─────────────────────────────────────────────────────────────
-total_capex_usd = (panel_capex_usd + bat_capex_usd) * (1 + install_factor / 100)
-total_capex_mxn = total_capex_usd * usd_mxn
-
-with st.container(border=True):
-    st.markdown("<h3 class='section-title'>💳 Inversión Inicial (CAPEX)</h3>", unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Paneles FV", f"${panel_capex_usd:,.0f} USD")
-    c2.metric("Baterías", f"${bat_capex_usd:,.0f} USD")
-    c3.metric("CAPEX total (c/instalación)", f"${total_capex_usd:,.0f} USD")
-    c4.metric("CAPEX total (MXN)", f"${total_capex_mxn:,.0f} MXN", help=f"TDC: {usd_mxn} MXN/USD")
-
-# ── Cálculo Inicial ───────────────────────────────────────────────────────────
-# Si el usuario llega directo desde Configuración (Guardar) sin pasar por la página
-# de Demanda, generamos un perfil industrial sintético por defecto para que el
-# análisis económico SIEMPRE pueda abrirse. Puede afinarlo en "Demanda e Inyección".
-if demand_df is None:
-    st.info(
-        "ℹ️ No se ha cargado una curva de demanda, por lo que se generó un **perfil "
-        "industrial sintético por defecto** (Manufactura, 600 kW pico) para que puedas "
-        "ver el análisis. Para resultados a tu medida, captura o sube tu curva en la "
-        "página **📊 Demanda e Inyección**."
-    )
-    _tz = st.session_state.get("tz", "America/Monterrey")
-    _shape = np.array([0.42, 0.40, 0.39, 0.38, 0.39, 0.43,
-                       0.65, 0.82, 0.95, 0.98, 1.00, 0.99,
-                       0.97, 0.96, 0.97, 0.96, 0.95, 0.96,
-                       0.98, 1.00, 0.99, 0.95, 0.80, 0.55])
-    if solar_kw is not None and len(solar_kw) > 0:
-        _idx = solar_kw.index
-    else:
-        _idx = pd.date_range("2024-01-01", "2025-01-01", freq="h", tz=_tz, inclusive="left")
-    _rng = np.random.default_rng(42)
-    _vals = []
-    for _ts in _idx:
-        _wf = 0.45 if _ts.weekday() >= 5 else 1.0
-        _sf = 1.08 if _ts.month in (4, 5, 6, 7, 8, 9, 10) else 1.0
-        _noise = min(1.15, max(0.85, 1.0 + _rng.normal(0, 0.035)))
-        _vals.append(600.0 * _shape[_ts.hour] * _wf * _sf * _noise)
-    demand_df = pd.DataFrame({"demand": _vals}, index=_idx)
-    st.session_state["demand_df"] = demand_df
-    st.session_state.setdefault("demand_source", "Sintético — muestra automática (Economía)")
-
-calc = GDMTHCalculator(region=region)
-
-# Group demand by month and compute bill
-demand_series = demand_df["demand"].copy()
-if solar_kw is not None:
-    solar_series = solar_kw.copy()
-else:
-    solar_series = pd.Series(0.0, index=demand_series.index)
-
-# If a battery is configured, dispatch it to obtain the post-storage grid demand
-battery_net = None
-if use_battery and battery_cfg:
-    from core.battery import dispatch_net
-    battery_net = dispatch_net(demand_df, solar_series, battery_cfg)
-
-monthly_results = []
-months_available = demand_series.groupby(demand_series.index.month).groups.keys()
-
-for month_num in sorted(months_available):
-    mask = demand_series.index.month == month_num
-    d_month = demand_series[mask]
-    s_month = solar_series[mask] if mask.any() else pd.Series(0.0, index=d_month.index)
-    final_net = battery_net[mask] if battery_net is not None else None
-    result = calc.compute_bill(d_month, solar_kw=s_month, final_net_kw=final_net)
-    if result:
-        monthly_results.append(result)
-
-if not monthly_results:
-    st.error("❌ No se pudieron calcular los cargos. Verifica los datos de demanda.")
     st.stop()
 
-st.session_state["monthly_results"] = monthly_results
-month_names = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
-annual = calc.annual_savings(monthly_results)
-
-# ── Annual aggregates ─────────────────────────────────────────────────────────
-st.write("")
-with st.container(border=True):
-    st.markdown("<h3 class='section-title'>📊 Resumen Financiero Anual</h3>", unsafe_allow_html=True)
-    
-    a1, a2, a3, a4 = st.columns(4)
-    a1.metric("Generación FV total", f"{annual['solar_generated_kwh']:,.0f} kWh")
-    a2.metric("Factura Original CFE", f"${annual['orig_total_mxn']:,.0f} MXN")
-    a3.metric("Nueva Factura (Con FV)", f"${annual['total_mxn']:,.0f} MXN")
-    a4.metric("Ahorro Anual Total", f"${annual['savings_mxn']:,.0f} MXN",
-               delta=f"{annual['savings_mxn']/annual['orig_total_mxn']*100:.1f}% reducción")
-
-    st.divider()
-    
-    a5, a6, a7, a8 = st.columns(4)
-    a5.metric("Ahorro en Energía", f"${annual['savings_energy_mxn']:,.0f} MXN")
-    a6.metric("Ahorro en Capacidad", f"${annual['savings_capacidad_mxn']:,.0f} MXN")
-    a7.metric("Ahorro en Distribución", f"${annual['savings_distribucion_mxn']:,.0f} MXN")
-    payback = calc.payback_period(total_capex_mxn, annual["savings_mxn"])
-    a8.metric("Payback Simple", f"{payback:.1f} años" if payback < 100 else ">100 años")
-
-# ── Monthly analysis & Visuals ────────────────────────────────────────────────
-st.write("")
-with st.container(border=True):
-    st.markdown("<h3 class='section-title'>📉 Análisis Mensual Detallado</h3>", unsafe_allow_html=True)
-    
-    # Tabla en Expander para mantener limpio el dashboard
-    with st.expander("📄 Ver desglose tabular por mes"):
-        table_rows = []
-        for r in monthly_results:
-            table_rows.append({
-                "Mes": month_names[r["month"] - 1],
-                "Temporada": "Alta" if r["season"] == "temporada_alta" else "Baja",
-                "kWh Punta": f"{r['orig_punta_kwh']:,.0f}",
-                "kWh Inter.": f"{r['orig_inter_kwh']:,.0f}",
-                "kWh Base": f"{r['orig_base_kwh']:,.0f}",
-                "Cargo Energía": f"${r['orig_charge_punta']+r['orig_charge_inter']+r['orig_charge_base']:,.0f}",
-                "Cargo Capacidad": f"${r['orig_charge_capacidad']:,.0f}",
-                "Cargo Dist.": f"${r['orig_charge_distribucion']:,.0f}",
-                "Total sin FV": f"${r['orig_total_mxn']:,.0f}",
-                "Total con FV": f"${r['total_mxn']:,.0f}",
-                "Ahorro": f"${r['savings_mxn']:,.0f}",
-            })
-        df_table = pd.DataFrame(table_rows)
-        st.dataframe(df_table, use_container_width=True, hide_index=True)
-
-    st.write("---")
-    
-    col_sel, _ = st.columns([1, 3])
-    with col_sel:
-        month_sel = st.selectbox("Selecciona un mes para ver detalle:",
-                                  [month_names[r["month"] - 1] for r in monthly_results],
-                                  index=0)
-    
-    sel_result = monthly_results[[month_names[r["month"] - 1] for r in monthly_results].index(month_sel)]
-    
-    st.markdown(f"#### Desglose de ahorros: {month_sel}")
-    fig_wf = savings_waterfall(sel_result)
-    chart_with_export(fig_wf, key="eco_waterfall", filename="desglose_ahorros")
-
-    col_pie, col_bar = st.columns(2)
-    with col_pie:
-        st.markdown("#### Consumo por período (Con FV)")
-        fig_pie = energy_pie(sel_result)
-        chart_with_export(fig_pie, key="eco_pie", filename="consumo_por_periodo")
-
-    with col_bar:
-        if len(monthly_results) > 1:
-            st.markdown("#### Comparación Mensual Histórica")
-            fig_monthly = monthly_savings_bar(monthly_results)
-            chart_with_export(fig_monthly, key="eco_monthly", filename="comparacion_mensual")
-
-# ── Multi-year projection ─────────────────────────────────────────────────────
-st.write("")
-with st.container(border=True):
-    st.markdown("<h3 class='section-title'>📈 Proyección a Largo Plazo (Flujo de Efectivo)</h3>", unsafe_allow_html=True)
-
-    annual_savings_base = annual["savings_mxn"]
-    opex_annual_mxn = total_capex_mxn * (opex_pct / 100)
-    inflation = inflation_pct / 100
-
-    years = list(range(1, project_life + 1))
-    cumulative_net = []
-    annual_net_savings = []
-    cumulative = -total_capex_mxn
-    for yr in years:
-        savings_yr = annual_savings_base * ((1 + inflation) ** (yr - 1))
-        net_yr = savings_yr - opex_annual_mxn
-        annual_net_savings.append(net_yr)
-        cumulative += net_yr
-        cumulative_net.append(cumulative)
-
-    fig_proj = go.Figure()
-    fig_proj.add_trace(go.Bar(x=years, y=annual_net_savings, name="Ahorro Neto Anual (Descontando OPEX)",
-                               marker_color="#FFB300"))
-    fig_proj.add_trace(go.Scatter(x=years, y=cumulative_net, name="Flujo Acumulado",
-                                   line=dict(color="#0039A6", width=3), yaxis="y2"))
-    fig_proj.add_hline(y=0, line_dash="dash", line_color="black")
-    
-    fig_proj.update_layout(
-        template="plotly_white",
-        xaxis_title="Año de operación",
-        yaxis_title="Flujo Anual (MXN)",
-        yaxis2=dict(title="Flujo Acumulado (MXN)", overlaying="y", side="right", showgrid=False),
-        height=400,
-        legend=dict(orientation="h", y=-0.15),
-        margin=dict(t=10, b=60),
-        hovermode="x unified",
+# ── 1) Cotización de baterías (viene de la sección de baterías) ───────────────
+st.markdown("#### 🔋 Cotización de baterías (desde la sección de baterías)")
+if len(_quote_sources) > 1:
+    _idx = st.radio(
+        "Fuente de la cotización", range(len(_quote_sources)),
+        format_func=lambda i: _quote_sources[i][0], key="cont_quote_source",
     )
-    chart_with_export(fig_proj, key="eco_projection", filename="proyeccion_flujo_efectivo")
+else:
+    _idx = 0
+_src_label, _capex_auto, _src_detail = _quote_sources[_idx]
+st.caption(f"📦 {_src_detail} → **$ {_capex_auto:,.2f} MXN**")
 
-    npv = sum(net / (1 + 0.10) ** yr for yr, net in zip(years, annual_net_savings)) - total_capex_mxn
-    roi_pct = (sum(annual_net_savings) / total_capex_mxn * 100) if total_capex_mxn > 0 else 0
+_override = st.number_input(
+    "Sustituir por cotización comercial real en PDF (MXN, opcional)", min_value=0.0,
+    value=float(st.session_state.get("battery_quote_mxn", 0.0)),
+    step=1000.0, format="%.2f", key="cont_quote_override",
+    help="Si ya tienes una cotización de proveedor, ingrésala para sustituir la de "
+         "catálogo. Deja 0 para usar la cotización traída de la sección de baterías.",
+)
+st.session_state["battery_quote_mxn"] = float(_override)
+capex_batt = _override if _override > 0 else _capex_auto
+capex_src = "cotización comercial (manual)" if _override > 0 else _src_label
 
-    st.divider()
-    
-    fin1, fin2, fin3 = st.columns(3)
-    fin1.metric("Valor Presente Neto (10% WACC)", f"${npv:,.0f} MXN", delta="Rentable" if npv > 0 else "Pérdida", delta_color="normal" if npv > 0 else "inverse")
-    fin2.metric("Retorno de Inversión (ROI) Total", f"{roi_pct:,.0f} %")
-    fin3.metric("Costo Promedio (CAPEX / kWp)", f"${total_capex_usd/system_kwp:,.0f} USD/kWp" if system_kwp > 0 else "—")
+# ── 2) INPUT manual: costo histórico anual por apagones (costo de la inacción) ─
+st.markdown("#### 💥 Costo de la inacción")
+outage_cost = st.number_input(
+    "Monto anual histórico gastado en reparaciones por apagones (MXN/año)",
+    min_value=0.0, value=float(st.session_state.get("outage_cost_annual", 0.0)),
+    step=1000.0, format="%.2f", key="cont_outage_cost",
+    help="Gasto histórico real en reparaciones de equipo, mermas, producto perdido y "
+         "paros de producción causados por cortes de CFE. Es el costo que el respaldo evita.",
+)
+st.session_state["outage_cost_annual"] = float(outage_cost)
 
-# ── Export ────────────────────────────────────────────────────────────────────
-st.write("")
+# ── 3) Parámetros financieros ─────────────────────────────────────────────────
+fp1, fp2, fp3 = st.columns(3)
+project_life = fp1.number_input("Vida del proyecto (años)", min_value=5, max_value=25,
+                                value=10, step=1, key="cont_life")
+inflation_pct = fp2.number_input("Inflación de costos (%/año)", min_value=0.0,
+                                 max_value=15.0, value=5.0, step=0.5, key="cont_infl")
+discount_pct = fp3.number_input("Tasa de descuento / WACC (%)", min_value=1.0,
+                                max_value=25.0, value=10.0, step=0.5, key="cont_disc")
+
+# ── 4) Escenario con paneles (FV) — automático desde Sección 2 o manual ───────
+# Para que el escenario "con paneles" funcione bajo cualquier tarifa (GDMTO o
+# GDMTH), tomamos el ahorro FV de la Sección 2 si existe y, si no, dejamos que el
+# usuario lo capture aquí. Así siempre se pueden comparar ambos escenarios.
+_fv_auto_ahorro = float(st.session_state.get("ahorro_fv_anual", 0.0))
+_fv_auto_capex = float(st.session_state.get("s2_fv_capex_mxn", 0.0))
+
+st.markdown("#### ☀️ Escenario con paneles solares (FV)")
+incluir_fv = st.toggle(
+    "Comparar también el escenario CON paneles solares", value=(_fv_auto_ahorro > 0 or _fv_auto_capex > 0),
+    key="cont_incluir_fv",
+    help="Si la Sección 2 ya calculó tu ahorro FV se usa automáticamente; también puedes "
+         "capturarlo a mano para comparar con y sin paneles en cualquier tarifa.",
+)
+if incluir_fv:
+    cfv1, cfv2 = st.columns(2)
+    fv_capex = cfv1.number_input(
+        "CAPEX de paneles FV (MXN)", min_value=0.0, value=_fv_auto_capex, step=1000.0,
+        format="%.2f", key="cont_fv_capex",
+        help="Inversión en paneles. Se trae de la Sección 2 si está disponible.",
+    )
+    ahorro_fv = cfv2.number_input(
+        "Ahorro anual por FV (MXN/año)", min_value=0.0, value=_fv_auto_ahorro, step=1000.0,
+        format="%.2f", key="cont_fv_ahorro",
+        help="Ahorro tarifario anual que aportan los paneles.",
+    )
+else:
+    fv_capex, ahorro_fv = 0.0, 0.0
+
+if outage_cost <= 0 and ahorro_fv <= 0:
+    st.info("ℹ️ Ingresa el costo anual por apagones (y/o activa el escenario **con paneles** "
+            "arriba) para evaluar el ROI de la continuidad.")
+    st.stop()
+
+# ── 5) Escenarios de flujo (mismo motor que la optimización de baterías) ──────
+# SIN paneles: batería sola, justificada SÓLO por las pérdidas evitadas.
+cf_sin = continuity_cashflows(capex_batt, outage_cost,
+                              int(project_life), inflation_pct, discount_pct)
+# CON paneles: batería + FV → pérdidas evitadas + ahorro tarifario FV.
+cf_con = continuity_cashflows(capex_batt + fv_capex, outage_cost + ahorro_fv,
+                              int(project_life), inflation_pct, discount_pct)
+
+roi_sin = _roi_total_continuidad(capex_batt, outage_cost,
+                                 int(project_life), inflation_pct)
+roi_con = _roi_total_continuidad(capex_batt + fv_capex, outage_cost + ahorro_fv,
+                                 int(project_life), inflation_pct)
+
+# Costo acumulado de NO hacer nada (apagones a lo largo de la vida útil)
+_infl = inflation_pct / 100.0
+inaccion_total = sum(outage_cost * ((1 + _infl) ** (yr - 1))
+                     for yr in range(1, int(project_life) + 1))
+
+st.markdown(
+    f"**CAPEX baterías ({capex_src}):** $ {capex_batt:,.2f} MXN · "
+    f"**CAPEX FV:** $ {fv_capex:,.2f} MXN · "
+    f"**Beneficio anual:** apagones evitados $ {outage_cost:,.2f}"
+    + (f" + ahorro FV $ {ahorro_fv:,.2f}" if ahorro_fv > 0 else "")
+)
+
+# ── 6) OUTPUT principal: ROI por pérdidas evitadas (costo de la inacción) ──────
+st.markdown("#### 🎯 ROI basado en pérdidas evitadas (costo de la inacción)")
 with st.container(border=True):
-    st.markdown("<h3 class='section-title'>📥 Exportar Resultados</h3>", unsafe_allow_html=True)
-    col_x1, col_x2, col_x3 = st.columns(3)
+    r1, r2, r3 = st.columns(3)
+    r1.metric("ROI — sólo respaldo (sin paneles)",
+              f"{roi_sin:,.0f} %" if roi_sin == roi_sin else "—",
+              help="Retorno de invertir SÓLO en baterías, justificado únicamente por las "
+                   "reparaciones por apagones que se evitan.")
+    r2.metric("Payback — sin paneles",
+              f"{cf_sin['payback_years']:.1f} años"
+              if cf_sin["payback_years"] < 100 else "∞",
+              help="CAPEX batería / costo anual de apagones evitado.")
+    r3.metric("VPN — sin paneles", f"$ {cf_sin['npv_mxn']:,.0f} MXN",
+              delta="Rentable" if cf_sin["npv_mxn"] > 0 else "No rentable",
+              delta_color="normal" if cf_sin["npv_mxn"] > 0 else "inverse")
+    st.caption(
+        f"💥 Costo de NO invertir a lo largo de {int(project_life)} años (apagones "
+        f"acumulados): **$ {inaccion_total:,.0f} MXN** frente a una inversión en baterías "
+        f"de **$ {capex_batt:,.0f} MXN**."
+    )
 
-    # Excel export
-    with col_x1:
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            df_table.to_excel(writer, sheet_name="Resumen Mensual", index=False)
-            pd.DataFrame([{
-                "Generación FV (kWh/año)": annual["solar_generated_kwh"],
-                "Factura sin FV (MXN/año)": annual["orig_total_mxn"],
-                "Factura con FV (MXN/año)": annual["total_mxn"],
-                "Ahorro anual (MXN)": annual["savings_mxn"],
-                "Payback (años)": payback,
-                "VPN (MXN)": npv,
-                "ROI (%)": roi_pct,
-                "CAPEX total (MXN)": total_capex_mxn,
-            }]).to_excel(writer, sheet_name="Indicadores", index=False)
-            pd.DataFrame({"Año": years, "Ahorro neto (MXN)": annual_net_savings,
-                          "Flujo acumulado (MXN)": cumulative_net}).to_excel(
-                writer, sheet_name="Proyección multi-año", index=False)
-        buf.seek(0)
-        st.download_button("📊 Descargar Excel", data=buf, file_name="analisis_gdmth_financiero.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True)
+# ── 7) OUTPUT secundario: ROI integral (respaldo + paneles) ───────────────────
+if fv_capex > 0 or ahorro_fv > 0:
+    st.markdown("#### ☀️ ROI integral (respaldo + paneles)")
+    with st.container(border=True):
+        rc1, rc2, rc3 = st.columns(3)
+        rc1.metric("ROI — con paneles",
+                   f"{roi_con:,.0f} %" if roi_con == roi_con else "—",
+                   help="Retorno de baterías + FV: pérdidas evitadas + ahorro tarifario.")
+        rc2.metric("Payback — con paneles",
+                   f"{cf_con['payback_years']:.1f} años"
+                   if cf_con["payback_years"] < 100 else "∞")
+        rc3.metric("VPN — con paneles", f"$ {cf_con['npv_mxn']:,.0f} MXN",
+                   delta="Rentable" if cf_con["npv_mxn"] > 0 else "No rentable",
+                   delta_color="normal" if cf_con["npv_mxn"] > 0 else "inverse")
 
-    # PDF export logic
-    with col_x2:
-        if st.button("📄 Generar Reporte Ejecutivo PDF", type="primary", use_container_width=True):
-            try:
-                from reportlab.lib.pagesizes import letter
-                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-                from reportlab.lib import colors
-                from reportlab.lib.units import inch
-
-                pdf_buf = io.BytesIO()
-                doc = SimpleDocTemplate(pdf_buf, pagesize=letter,
-                                         leftMargin=0.75*inch, rightMargin=0.75*inch,
-                                         topMargin=0.75*inch, bottomMargin=0.75*inch)
-                styles = getSampleStyleSheet()
-                tec_blue = colors.HexColor("#0039A6")
-                solar_yellow = colors.HexColor("#FFB300")
-
-                title_style = ParagraphStyle("title", parent=styles["Title"],
-                                             textColor=tec_blue, fontSize=18)
-                h2_style = ParagraphStyle("h2", parent=styles["Heading2"],
-                                           textColor=tec_blue, fontSize=13)
-                normal = styles["Normal"]
-
-                story = []
-
-                # Title
-                story.append(Paragraph("Análisis Económico Solar — Tarifa GDMTH", title_style))
-                story.append(Paragraph("Tecnológico de Monterrey", normal))
-                story.append(Spacer(1, 0.15*inch))
-
-                # Team info
-                members = st.session_state.get("members", [])
-                team_no = st.session_state.get("team_number", "—")
-                story.append(Paragraph(f"Equipo #{team_no}", h2_style))
-                for m in members:
-                    if m.get("name"):
-                        story.append(Paragraph(f"• {m['name']} ({m.get('student_id','—')}) — {m.get('role','—')}", normal))
-                story.append(Spacer(1, 0.1*inch))
-
-                # System config
-                story.append(Paragraph("Configuración del sistema", h2_style))
-                story.append(Paragraph(
-                    f"Ubicación: {st.session_state.get('city','—')} | "
-                    f"Latitud: {st.session_state.get('lat','—')}°N | "
-                    f"Longitud: {st.session_state.get('lon','—')}°E", normal))
-                if panel:
-                    story.append(Paragraph(
-                        f"Panel: {panel.get('brand','')} {panel.get('model','')} | "
-                        f"{panel.get('wp',0)}Wp | {panel.get('efficiency_pct',0)}% eficiencia", normal))
-                story.append(Paragraph(
-                    f"Sistema: {system_kwp:.2f} kWp | "
-                    f"CAPEX total: ${total_capex_mxn:,.0f} MXN (${total_capex_usd:,.0f} USD)", normal))
-                story.append(Spacer(1, 0.1*inch))
-
-                # Financial indicators
-                story.append(Paragraph("Indicadores financieros", h2_style))
-                indicators = [
-                    ["Indicador", "Valor"],
-                    ["Generación FV (kWh/año)", f"{annual['solar_generated_kwh']:,.0f}"],
-                    ["Ahorro anual (MXN)", f"${annual['savings_mxn']:,.0f}"],
-                    ["Factura sin FV (MXN/año)", f"${annual['orig_total_mxn']:,.0f}"],
-                    ["Factura con FV (MXN/año)", f"${annual['total_mxn']:,.0f}"],
-                    ["Payback simple", f"{payback:.1f} años"],
-                    ["VPN (10% WACC)", f"${npv:,.0f} MXN"],
-                    ["ROI total", f"{roi_pct:.0f} %"],
-                ]
-                t = Table(indicators, colWidths=[3.5*inch, 2.5*inch])
-                t.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, 0), tec_blue),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5F5F5")]),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
-                    ("FONTSIZE", (0, 0), (-1, -1), 10),
-                    ("PADDING", (0, 0), (-1, -1), 5),
-                ]))
-                story.append(t)
-                story.append(Spacer(1, 0.1*inch))
-
-                # Monthly table
-                story.append(Paragraph("Desglose mensual de cargos GDMTH", h2_style))
-                monthly_data = [["Mes", "Sin FV (MXN)", "Con FV (MXN)", "Ahorro (MXN)"]]
-                for r in monthly_results:
-                    monthly_data.append([
-                        month_names[r["month"] - 1],
-                        f"${r['orig_total_mxn']:,.0f}",
-                        f"${r['total_mxn']:,.0f}",
-                        f"${r['savings_mxn']:,.0f}",
-                    ])
-                mt = Table(monthly_data, colWidths=[1.5*inch, 2*inch, 2*inch, 2*inch])
-                mt.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, 0), tec_blue),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5F5F5")]),
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
-                    ("FONTSIZE", (0, 0), (-1, -1), 9),
-                    ("PADDING", (0, 0), (-1, -1), 4),
-                ]))
-                story.append(mt)
-                story.append(Spacer(1, 0.15*inch))
-
-                # Abstract
-                abstract = st.session_state.get("abstract", "")
-                if abstract:
-                    story.append(Paragraph("Resumen metodológico", h2_style))
-                    story.append(Paragraph(abstract, normal))
-                    story.append(Spacer(1, 0.1*inch))
-
-                story.append(Paragraph(
-                    f"Generado: {datetime.date.today()} | Modelo: Jensen isótropo (pvlib) | "
-                    f"Región CFE: {region}",
-                    ParagraphStyle("footer", parent=normal, textColor=colors.gray, fontSize=8)
-                ))
-
-                doc.build(story)
-                pdf_buf.seek(0)
-                st.session_state["report_pdf"] = pdf_buf.getvalue()
-                st.success("✅ PDF generado y listo para descargar.")
-            except ImportError:
-                st.error("⚠️ Instala reportlab para generar el PDF: `pip install reportlab`")
-            except Exception as e:
-                st.error(f"Error generando PDF: {e}")
-
-    with col_x3:
-        if "report_pdf" in st.session_state:
-            st.download_button(
-                "📥 Descargar PDF",
-                data=st.session_state["report_pdf"],
-                file_name="reporte_gdmth_solar.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-        else:
-            st.info("👈 Haz clic en 'Generar Reporte' primero.")
+# ── 8) OUTPUT: simulación de cashflow mensual CON y SIN paneles ───────────────
+st.markdown("#### 💸 Cashflow mensual a valor presente — con y sin paneles")
+chart_with_export(
+    continuity_cashflow_bar(
+        cf_con["months"], cf_con["monthly_pv_flows"], cf_sin["monthly_pv_flows"],
+        cf_con["cumulative_pv"], cf_sin["cumulative_pv"],
+    ),
+    key="cont_cashflow", filename="cashflow_continuidad",
+)
+st.caption(
+    "Mes 0 = CAPEX inicial (negativo). **Con paneles** = baterías + FV "
+    "(apagones evitados + ahorro tarifario). **Sin paneles** = baterías solas "
+    "(sólo apagones evitados). Patrón de descuento: "
+    "beneficio·(1+inflación)^(año−1) / (1+descuento)^año."
+)

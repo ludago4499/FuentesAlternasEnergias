@@ -14,8 +14,10 @@ from core.plots import (irradiance_plot, generation_bar, poa_heatmap,
                          poa_exceedance_plot, efficiency_breakdown_table,
                          sunrise_sunset_pattern_plot)
 from core.exporting import chart_with_export
+from core.state import keep_state
 
 st.set_page_config(page_title="Análisis Solar — GDMTH Solar", page_icon="🌞", layout="wide")
+keep_state()
 
 st.markdown("<h1 style='color:#0039A6;font-weight:700'>Análisis Solar — Modelo Jensen (pvlib)</h1>",
             unsafe_allow_html=True)
@@ -98,37 +100,24 @@ st.caption(f"Períodos esperados: **{n_periods_expected:,}** | N anual equivalen
 st.divider()
 with st.expander("Fuente de datos meteorológicos", expanded=True):
     _SOURCE_LABELS = {
-        "Cielo despejado (modelo ideal)": "clearsky",
         "Variabilidad estocástica — AR(1)": "stochastic",
-        "Datos reales NREL NSRDB (API)": "nsrdb",
+        "Cielo despejado (modelo ideal)": "clearsky",
     }
     weather_label = st.radio(
         "Fuente de datos",
         list(_SOURCE_LABELS.keys()),
-        index=1,  # Variabilidad estocástica (AR-1) por defecto
+        index=0,  # Variabilidad estocástica (AR-1) por defecto
         horizontal=True,
         help=(
-            "**Cielo despejado**: Ineichen sin nubes. "
-            "**Estocástico**: proceso AR(1) diario que simula días nublados/despejados. "
-            "**NSRDB**: datos TMY reales de la NREL para las coordenadas del sitio."
+            "**Estocástico**: proceso AR(1) diario que simula días nublados/despejados, "
+            "reviertiendo hacia la claridad climática real del sitio (turbidez de Linke por mes). "
+            "**Cielo despejado**: Ineichen sin nubes."
         ),
     )
     weather_source = _SOURCE_LABELS[weather_label]
 
-    c_key, c_email, c_seed = st.columns([2, 2, 1])
-    nsrdb_key = c_key.text_input(
-        "NREL API Key", value="", type="password",
-        disabled=(weather_source != "nsrdb"),
-        help="Obtén una llave gratuita en developer.nlr.gov/signup/",
-        placeholder="Ingresa tu API key…",
-    )
-    nsrdb_email = c_email.text_input(
-        "Email (NSRDB)", value="",
-        disabled=(weather_source != "nsrdb"),
-        placeholder="tucorreo@ejemplo.com",
-    )
-    ar1_seed = c_seed.number_input(
-        "Semilla", value=42, min_value=0, step=1,
+    ar1_seed = st.number_input(
+        "Semilla aleatoria", value=42, min_value=0, step=1,
         disabled=(weather_source != "stochastic"),
         help="Cambia la semilla para obtener un perfil estocástico diferente.",
     )
@@ -147,78 +136,6 @@ with st.expander("Fuente de datos meteorológicos", expanded=True):
     else:
         ar1_phi, ar1_sigma = 0.92, 0.10
 
-    if weather_source == "nsrdb" and (not nsrdb_key or not nsrdb_email):
-        st.warning("Ingresa API key y email para usar datos NSRDB.")
-
-    if weather_source == "nsrdb" and nsrdb_key and nsrdb_email:
-        if st.button("Verificar conexión NREL", type="secondary"):
-            import requests
-            with st.spinner("Diagnosticando red…"):
-                _diag = []
-
-                # Step 1 — basic internet
-                try:
-                    requests.get("https://www.google.com", timeout=6)
-                    _diag.append("✅ Internet general: OK")
-                    _internet_ok = True
-                except Exception as e:
-                    _diag.append(f"❌ Internet general: sin respuesta ({type(e).__name__})")
-                    _internet_ok = False
-
-                # Step 2 — NREL homepage (no auth needed)
-                if _internet_ok:
-                    try:
-                        r2 = requests.get("https://developer.nlr.gov", timeout=8)
-                        _diag.append(f"✅ developer.nlr.gov: HTTP {r2.status_code}")
-                        _nrel_ok = True
-                    except Exception as e:
-                        _diag.append(f"❌ developer.nlr.gov bloqueado ({type(e).__name__}). "
-                                     "Tu red (Tec/VPN/firewall) bloquea este dominio.")
-                        _nrel_ok = False
-                else:
-                    _nrel_ok = False
-
-                # Step 3 — API key test (uses same endpoint pvlib calls internally)
-                if _nrel_ok:
-                    _test_url = (
-                        "https://developer.nlr.gov/api/nsrdb/v2/solar/"
-                        "nsrdb-GOES-tmy-v4-0-0-download.csv"
-                        f"?api_key={nsrdb_key}&email={nsrdb_email}"
-                        f"&names=tmy&wkt=POINT({lon:.4f}%20{lat:.4f})"
-                        "&attributes=ghi,dhi,dni&utc=false&leap_day=false"
-                    )
-                    try:
-                        r3 = requests.get(_test_url, timeout=20)
-                        if r3.status_code == 200 and ("GHI" in r3.text or "ghi" in r3.text):
-                            _diag.append("✅ API key válida — datos NSRDB disponibles para este sitio")
-                        elif r3.status_code == 403:
-                            _diag.append("❌ HTTP 403 — API key inválida o no activada aún. "
-                                         "Revisa developer.nlr.gov → My Account")
-                        elif r3.status_code == 429:
-                            _diag.append("⚠️ HTTP 429 — Límite de solicitudes. Espera ~1 min.")
-                        elif r3.status_code == 200:
-                            _diag.append(f"⚠️ HTTP 200 pero sin columna GHI. "
-                                         f"Respuesta: `{r3.text[:200]}`")
-                        else:
-                            _diag.append(f"❌ HTTP {r3.status_code}: {r3.text[:300]}")
-                    except Exception as e:
-                        _diag.append(f"❌ Error al llamar la API: {e}")
-
-            for line in _diag:
-                if line.startswith("✅"):
-                    st.success(line)
-                elif line.startswith("⚠️"):
-                    st.warning(line)
-                else:
-                    st.error(line)
-
-            if not _internet_ok:
-                st.info("Sin internet. Revisa tu conexión de red.")
-            elif not _nrel_ok:
-                st.info("El dominio developer.nlr.gov está bloqueado desde esta red. "
-                        "Prueba en una red diferente (hotspot del celular, casa, etc.) "
-                        "o usa el modo **Variabilidad estocástica** como alternativa.")
-
     with st.expander("Parámetros de pérdidas del sistema", expanded=False):
         lc1, lc2 = st.columns(2)
         soiling_pct = lc1.slider("Pérdida por suciedad / polvo (%)", 0.0, 10.0, 2.0, 0.5,
@@ -228,11 +145,9 @@ with st.expander("Fuente de datos meteorológicos", expanded=True):
 
 # ── Run model ─────────────────────────────────────────────────────────────────
 run_col, _ = st.columns([1, 3])
-_nsrdb_ready = weather_source != "nsrdb" or (bool(nsrdb_key) and bool(nsrdb_email))
 run_btn = run_col.button(
     "Ejecutar modelo Jensen", type="primary",
     use_container_width=True,
-    disabled=not _nsrdb_ready,
 )
 
 if run_btn or "irradiance_df" in st.session_state:
@@ -244,8 +159,6 @@ if run_btn or "irradiance_df" in st.session_state:
                     start_date=str(start_dt), end_date=str(end_dt),
                     tz=tz, altitude=altitude, freq=freq,
                     weather_source=weather_source,
-                    nsrdb_api_key=nsrdb_key or None,
-                    nsrdb_email=nsrdb_email or None,
                     stochastic_seed=int(ar1_seed),
                     ar1_phi=ar1_phi,
                     ar1_sigma=ar1_sigma,

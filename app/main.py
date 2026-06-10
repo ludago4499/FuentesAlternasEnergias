@@ -30,6 +30,7 @@ from core.plots import (irradiance_plot, monthly_demand_vs_solar_bar,
                         gdmto_savings_waterfall, typical_day_profile_plot,
                         monthly_savings_bar, continuity_cashflow_bar)
 from core.exporting import chart_with_export
+from core.state import keep_state
 
 st.set_page_config(
     page_title="Streger Solar — Análisis CFE",
@@ -37,6 +38,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+keep_state()
 
 DATA = Path(__file__).parent / "data"
 
@@ -155,6 +157,26 @@ with st.sidebar:
              "GDMTH: Gran Demanda en Media Tensión **Horaria** — flujo en las páginas del menú.",
     )
     st.divider()
+    # ── Ruta recomendada según la tarifa elegida al inicio ─────────────────────
+    st.markdown("### 🧭 Ruta recomendada")
+    if st.session_state["tariff_mode"] == "GDMTH":
+        st.markdown(
+            "Tarifa **GDMTH** (horaria):\n"
+            "1. ⚙️ Configuración\n"
+            "2. 🌞 Análisis Solar\n"
+            "3. 📊 Demanda **+ baterías**\n"
+            "4. 🔋 Baterías (peak shaving)\n"
+            "5. 📈 Continuidad / ROI"
+        )
+    else:
+        st.markdown(
+            "Tarifa **GDMTO** (plana):\n"
+            "1. 🧾 Secciones 2–4 (esta página)\n"
+            "2. ⚙️ Configuración (panel y ubicación)\n"
+            "3. 🔋 Baterías → respaldo\n"
+            "4. 📈 Continuidad / ROI"
+        )
+    st.divider()
     st.markdown("### ⚙️ Resumen")
     cs1, cs2 = st.columns(2)
     cs1.metric("Ciudad", st.session_state.get("city", "—").split(",")[0])
@@ -165,98 +187,98 @@ with st.sidebar:
     cs4.metric("Respaldo (h)", st.session_state.get("backup_hours", 0))
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SECCIÓN 1 — VISTA RÁPIDA (siempre visible)
+# SECCIÓN 1 — VISTA RÁPIDA (desplegable / colapsable)
 # ══════════════════════════════════════════════════════════════════════════════
-st.markdown("## 🔆 Sección 1 — Vista Rápida")
-st.caption("Elige la ubicación y orientación del arreglo: irradiancia de un día representativo "
-           "(equinoccio, cielo despejado, modelo Jensen/pvlib) y estimación instantánea por panel.")
+with st.expander("🔆 Sección 1 — Vista Rápida · ubicación, orientación y generación por panel", expanded=False):
+    st.caption("Elige la ubicación y orientación del arreglo: irradiancia de un día representativo "
+               "(equinoccio, cielo despejado, modelo Jensen/pvlib) y estimación instantánea por panel.")
 
-col_city, col_lat, col_lon = st.columns([2, 1, 1])
-city_names = list(CITIES.keys())
-_city_idx = city_names.index(st.session_state["city"]) if st.session_state["city"] in city_names \
-    else city_names.index("Personalizada")
-city = col_city.selectbox("Ubicación (capitales de estado de México)", city_names, index=_city_idx)
+    col_city, col_lat, col_lon = st.columns([2, 1, 1])
+    city_names = list(CITIES.keys())
+    _city_idx = city_names.index(st.session_state["city"]) if st.session_state["city"] in city_names \
+        else city_names.index("Personalizada")
+    city = col_city.selectbox("Ubicación (capitales de estado de México)", city_names, index=_city_idx)
 
-if city != "Personalizada":
-    _lat_d, _lon_d, _alt_d = CITIES[city]
-else:
-    _lat_d = st.session_state["lat"]
-    _lon_d = st.session_state["lon"]
-    _alt_d = st.session_state["altitude"]
+    if city != "Personalizada":
+        _lat_d, _lon_d, _alt_d = CITIES[city]
+    else:
+        _lat_d = st.session_state["lat"]
+        _lon_d = st.session_state["lon"]
+        _alt_d = st.session_state["altitude"]
 
-lat = col_lat.number_input("Latitud (°N)", min_value=14.5, max_value=32.7,
-                           value=float(_lat_d), step=0.001, format="%.4f")
-lon = col_lon.number_input("Longitud (°E)", min_value=-118.4, max_value=-86.7,
-                           value=float(_lon_d), step=0.001, format="%.4f")
-st.caption("💡 Edita las coordenadas si tu sitio no es la capital. "
-           "El mapa interactivo completo está en ⚙️ **Configuración**.")
+    lat = col_lat.number_input("Latitud (°N)", min_value=14.5, max_value=32.7,
+                               value=float(_lat_d), step=0.001, format="%.4f")
+    lon = col_lon.number_input("Longitud (°E)", min_value=-118.4, max_value=-86.7,
+                               value=float(_lon_d), step=0.001, format="%.4f")
+    st.caption("💡 Edita las coordenadas si tu sitio no es la capital. "
+               "El mapa interactivo completo está en ⚙️ **Configuración**.")
 
-opt_tilt = int(round(abs(lat)))
-col_tilt, col_az = st.columns(2)
-tilt = col_tilt.slider(
-    "Inclinación del panel (°)", min_value=0, max_value=60, value=opt_tilt,
-    help=f"Por defecto la inclinación óptima anual ≈ latitud del sitio ({opt_tilt}°). Ajústala si tu techo lo requiere.",
-)
-azimuth = col_az.slider(
-    "Azimut del panel (0° = Sur | −90° = Este | +90° = Oeste)",
-    min_value=-180, max_value=180, value=0, step=5,
-    help="Convención del proyecto: 0° = Sur (óptimo en México).",
-)
-azimuth_pvlib = (180.0 + float(azimuth)) % 360.0
-
-tz = _tz_for(city)
-
-# Persist S1 so the GDMTH pages (Configuración, Análisis Solar…) share the site
-st.session_state.update({
-    "city": city,
-    "lat": float(lat),
-    "lon": float(lon),
-    "altitude": float(_alt_d),
-    "tz": tz,
-    "tilt": float(tilt),
-    "azimuth": float(azimuth),
-})
-
-_TYPICAL_DAY = "2024-03-21"   # equinox ≈ annual-average solar geometry
-
-
-@st.cache_data(show_spinner=False)
-def _quick_day_irradiance(lat: float, lon: float, tilt: float, az_pvlib: float,
-                          tz: str, altitude: float) -> pd.DataFrame:
-    return run_jensen_model(
-        lat=lat, lon=lon, tilt=tilt, azimuth=az_pvlib,
-        start_date=_TYPICAL_DAY, end_date=_TYPICAL_DAY,
-        tz=tz, altitude=altitude, freq="h", weather_source="clearsky",
+    opt_tilt = int(round(abs(lat)))
+    col_tilt, col_az = st.columns(2)
+    tilt = col_tilt.slider(
+        "Inclinación del panel (°)", min_value=0, max_value=60, value=opt_tilt,
+        help=f"Por defecto la inclinación óptima anual ≈ latitud del sitio ({opt_tilt}°). Ajústala si tu techo lo requiere.",
     )
+    azimuth = col_az.slider(
+        "Azimut del panel (0° = Sur | −90° = Este | +90° = Oeste)",
+        min_value=-180, max_value=180, value=0, step=5,
+        help="Convención del proyecto: 0° = Sur (óptimo en México).",
+    )
+    azimuth_pvlib = (180.0 + float(azimuth)) % 360.0
+
+    tz = _tz_for(city)
+
+    # Persist S1 so the GDMTH pages (Configuración, Análisis Solar…) share the site
+    st.session_state.update({
+        "city": city,
+        "lat": float(lat),
+        "lon": float(lon),
+        "altitude": float(_alt_d),
+        "tz": tz,
+        "tilt": float(tilt),
+        "azimuth": float(azimuth),
+    })
+
+    _TYPICAL_DAY = "2024-03-21"   # equinox ≈ annual-average solar geometry
 
 
-df_day = _quick_day_irradiance(float(lat), float(lon), float(tilt), azimuth_pvlib,
-                               tz, float(_alt_d))
+    @st.cache_data(show_spinner=False)
+    def _quick_day_irradiance(lat: float, lon: float, tilt: float, az_pvlib: float,
+                              tz: str, altitude: float) -> pd.DataFrame:
+        return run_jensen_model(
+            lat=lat, lon=lon, tilt=tilt, azimuth=az_pvlib,
+            start_date=_TYPICAL_DAY, end_date=_TYPICAL_DAY,
+            tz=tz, altitude=altitude, freq="h", weather_source="clearsky",
+        )
 
-panel_ref = PANELS[0]
-pv_day_kw = compute_pv_generation(
-    df_day,
-    system_kwp=panel_ref["wp"] / 1000.0,
-    panel_efficiency=panel_ref["efficiency_pct"],
-    panel_wp=panel_ref["wp"],
-    panel_area_m2=panel_ref.get("area_m2"),
-    n_panels=1,
-    temp_coeff_pmax=panel_ref.get("temp_coeff_pmax", -0.30),
-    noct=panel_ref.get("noct", 43),
-)
-kwh_day_panel = energy_kwh(pv_day_kw, df_day)
 
-q1, q2, q3, q4 = st.columns(4)
-q1.metric("Generación por panel", f"{kwh_day_panel:.2f} kWh/día",
-          help=f"Panel de referencia: {panel_ref['brand']} {panel_ref['model']} ({panel_ref['wp']} W)")
-q2.metric("Equivalente mensual", f"{kwh_day_panel * 30:.0f} kWh/mes",
-          help="Por panel (≈ 30 días como el día representativo).")
-q3.metric("Horas solares pico", f"{peak_sun_hours(df_day):.1f} h")
-q4.metric("POA máxima", f"{float(df_day['poa_global'].max()):.0f} W/m²")
+    df_day = _quick_day_irradiance(float(lat), float(lon), float(tilt), azimuth_pvlib,
+                                   tz, float(_alt_d))
 
-chart_with_export(irradiance_plot(df_day), key="s1_irradiance", filename="irradiancia_dia")
-st.caption(f"Día representativo: {_TYPICAL_DAY} (equinoccio) · Cielo despejado Ineichen · "
-           f"Transposición isótropa (Jensen) · Inclinación {tilt}° · Azimut {azimuth:+d}° (0=Sur)")
+    panel_ref = PANELS[0]
+    pv_day_kw = compute_pv_generation(
+        df_day,
+        system_kwp=panel_ref["wp"] / 1000.0,
+        panel_efficiency=panel_ref["efficiency_pct"],
+        panel_wp=panel_ref["wp"],
+        panel_area_m2=panel_ref.get("area_m2"),
+        n_panels=1,
+        temp_coeff_pmax=panel_ref.get("temp_coeff_pmax", -0.30),
+        noct=panel_ref.get("noct", 43),
+    )
+    kwh_day_panel = energy_kwh(pv_day_kw, df_day)
+
+    q1, q2, q3, q4 = st.columns(4)
+    q1.metric("Generación por panel", f"{kwh_day_panel:.2f} kWh/día",
+              help=f"Panel de referencia: {panel_ref['brand']} {panel_ref['model']} ({panel_ref['wp']} W)")
+    q2.metric("Equivalente mensual", f"{kwh_day_panel * 30:.0f} kWh/mes",
+              help="Por panel (≈ 30 días como el día representativo).")
+    q3.metric("Horas solares pico", f"{peak_sun_hours(df_day):.1f} h")
+    q4.metric("POA máxima", f"{float(df_day['poa_global'].max()):.0f} W/m²")
+
+    chart_with_export(irradiance_plot(df_day), key="s1_irradiance", filename="irradiancia_dia")
+    st.caption(f"Día representativo: {_TYPICAL_DAY} (equinoccio) · Cielo despejado Ineichen · "
+               f"Transposición isótropa (Jensen) · Inclinación {tilt}° · Azimut {azimuth:+d}° (0=Sur)")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Modo GDMTH → el flujo detallado vive en las páginas laterales

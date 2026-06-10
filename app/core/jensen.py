@@ -58,6 +58,32 @@ def _build_poa_df(
     return df.clip(lower=0)
 
 
+# ── Climatic clearness from pvlib's bundled turbidity climatology ─────────────
+
+def _location_monthly_kt(lat: float, lon: float) -> np.ndarray:
+    """Monthly mean clearness index (kt) for the site, derived from pvlib's
+    bundled Linke turbidity climatology — fully offline, no external API.
+
+    A hazier / cloudier atmosphere (high Linke turbidity) maps to a lower mean
+    clearness index, while a clear, dry atmosphere maps to a higher one, so the
+    stochastic model reverts toward a level that reflects the real climate of
+    the chosen location and season. Returns a length-12 array (index 0 = enero).
+    """
+    try:
+        idx = pd.DatetimeIndex(
+            [pd.Timestamp(f"2020-{m:02d}-15 12:00") for m in range(1, 13)], tz="UTC"
+        )
+        tl = np.asarray(
+            pvlib.clearsky.lookup_linke_turbidity(idx, lat, lon, interp_turbidity=True),
+            dtype=float,
+        )
+    except Exception:
+        # If the climatology file is unavailable, fall back to a neutral value
+        # (≈ Mexican-plateau average) so behaviour degrades gracefully.
+        tl = np.full(12, 3.2)
+    return np.clip(0.85 - 0.07 * tl, 0.45, 0.78)
+
+
 # ── Stochastic cloud model ────────────────────────────────────────────────────
 
 def _apply_ar1_cloud_model(
@@ -70,13 +96,16 @@ def _apply_ar1_cloud_model(
     kt_min: float = 0.05,
     kt_max: float = 1.0,
     seed: int | None = None,
+    monthly_mu: "np.ndarray | None" = None,
 ) -> pd.DataFrame:
     """
     Apply auto-correlated (AR-1) daily cloud variability to clear-sky irradiance.
 
-    Generates a daily clearness index kt ~ AR(1) with mean 0.65, broadcasts it
-    to all intra-day timesteps, then re-transposes to POA so all components are
-    physically consistent.
+    Generates a daily clearness index kt ~ AR(1) that reverts toward a climatic
+    monthly mean (``monthly_mu``, length-12, derived from the site's turbidity
+    climatology), broadcasts it to all intra-day timesteps, then re-transposes to
+    POA so all components are physically consistent. If ``monthly_mu`` is None it
+    falls back to a constant 0.65 (Mexican-plateau average).
 
     phi   : day-to-day autocorrelation (0.92 → realistic persistence)
     sigma : innovation std-dev (0.10 → moderate variability)
@@ -86,13 +115,18 @@ def _apply_ar1_cloud_model(
 
     dates = sorted(set(clearsky_df.index.date))
     n_days = len(dates)
-    mu = 0.65  # long-run average kt for Mexican plateau
+
+    # Per-day reversion target = climatic mean kt for that calendar month.
+    if monthly_mu is not None:
+        mu_day = np.array([float(monthly_mu[d.month - 1]) for d in dates])
+    else:
+        mu_day = np.full(n_days, 0.65)  # long-run average kt for Mexican plateau
 
     # ── Layer 1: day-level background (slow, persistent) ──────────────────────
     kt_daily = np.empty(n_days)
-    kt_daily[0] = mu
+    kt_daily[0] = mu_day[0]
     for i in range(1, n_days):
-        kt_daily[i] = mu + phi * (kt_daily[i - 1] - mu) + sigma * rng.standard_normal()
+        kt_daily[i] = mu_day[i] + phi * (kt_daily[i - 1] - mu_day[i]) + sigma * rng.standard_normal()
     kt_daily = np.clip(kt_daily, kt_min, kt_max)
 
     date_to_kt = {d: k for d, k in zip(dates, kt_daily)}
@@ -283,6 +317,7 @@ def run_jensen_model(
             df_clearsky, solar_pos, tilt, azimuth,
             phi=ar1_phi, sigma=ar1_sigma, kt_min=kt_min, kt_max=kt_max,
             seed=stochastic_seed,
+            monthly_mu=_location_monthly_kt(lat, lon),
         )
 
     elif weather_source == "nsrdb":

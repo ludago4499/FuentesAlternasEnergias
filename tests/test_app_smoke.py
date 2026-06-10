@@ -120,9 +120,8 @@ def test_gdmth_mode_stops_main_flow():
     assert all(t.label != "Ingresar mi consumo CFE" for t in at.toggle)
 
 
-@pytest.mark.parametrize("page", ["5_economics.py", "6_baterias.py"])
-def test_pages_warn_and_stop_under_gdmto(page):
-    at = AppTest.from_file(str(APP_DIR / "pages" / page), default_timeout=60)
+def test_baterias_warns_and_stops_under_gdmto():
+    at = AppTest.from_file(str(APP_DIR / "pages" / "6_baterias.py"), default_timeout=60)
     at.run()
     assert not at.exception
     assert len(at.info) >= 1          # the GDMTO redirect notice
@@ -137,15 +136,29 @@ def test_baterias_gdmth_path_reaches_demand_warning():
     assert len(at.warning) >= 1       # "carga la demanda" guard
 
 
-def test_economics_gdmth_path_autogenerates_demand():
-    # Economía no longer dead-ends: with no demand curve it synthesises a default
-    # profile (info notice) so the analysis page always opens.
+def test_continuity_page_requires_battery_quote():
+    # The new Continuity page (5_economics.py) needs a battery quote from
+    # Sección 3 / página Baterías; with none it warns and stops cleanly.
     at = AppTest.from_file(str(APP_DIR / "pages" / "5_economics.py"), default_timeout=60)
-    at.session_state["tariff_mode"] = "GDMTH"
     at.run()
     assert not at.exception
-    assert at.session_state["demand_df"] is not None   # fallback profile created
-    assert len(at.info) >= 1                            # "perfil sintético" notice
+    assert len(at.warning) >= 1       # "no hay cotización de baterías" guard
+
+
+def test_continuity_page_computes_roi_with_quote_and_outage():
+    # With a battery proposal and an outage cost it produces the ROI metrics
+    # and the cashflow chart without errors.
+    at = AppTest.from_file(str(APP_DIR / "pages" / "5_economics.py"), default_timeout=60)
+    at.session_state["bess_proposal"] = {
+        "capex_mxn": 500_000.0, "units": 4, "brand": "Test", "model": "BESS",
+        "total_usable_kwh": 40.0,
+    }
+    at.session_state["outage_cost_annual"] = 120_000.0
+    at.run()
+    assert not at.exception
+    labels = [m.label for m in at.metric]
+    assert any("ROI" in l for l in labels)
+    assert any("VPN" in l for l in labels)
 
 
 def test_config_page_with_residential_tool():

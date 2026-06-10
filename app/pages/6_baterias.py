@@ -14,8 +14,10 @@ from core.plots import (
     battery_optimization_plot,
 )
 from core.exporting import chart_with_export
+from core.state import keep_state
 
 st.set_page_config(page_title="Baterías — GDMTH Solar", page_icon="🔋", layout="wide")
+keep_state()
 
 # ── CSS / Banner ──────────────────────────────────────────────────────────────
 st.markdown("""
@@ -79,8 +81,12 @@ bat_labels = [
     f"{b['roundtrip_efficiency_pct']}% RT | ${b['usd_per_kwh']}/kWh"
     for b in BATTERIES
 ]
+st.session_state.setdefault("battery_model_idx", 0)
+if st.session_state["battery_model_idx"] >= len(BATTERIES):
+    st.session_state["battery_model_idx"] = 0
 bat_idx = st.selectbox("Modelo de batería", range(len(BATTERIES)),
-                       format_func=lambda i: bat_labels[i])
+                       format_func=lambda i: bat_labels[i], key="battery_model_idx",
+                       help="Se sincroniza con el modelo elegido en la página de **Demanda**.")
 battery = BATTERIES[bat_idx]
 
 peak_kw = float(demand_df["demand"].max())
@@ -107,10 +113,13 @@ with col_left:
     )
 
 with col_right:
+    st.session_state.setdefault("battery_window", (18, 22))
     win = st.slider(
         "🕒 Ventana horaria para usar las baterías (hora del día)",
-        min_value=0, max_value=24, value=(18, 22), step=1,
-        help="Rango de horas en que la batería descarga. Por defecto el horario Punta (18–22h).",
+        min_value=0, max_value=24, step=1,
+        key="battery_window",
+        help="Rango de horas en que la batería descarga. Por defecto el horario Punta (18–22h). "
+             "Se sincroniza con la ventana elegida en la página de **Demanda**.",
     )
     use_umbral = st.toggle("Usar umbral de recorte (peak shaving a un techo)", value=True)
     default_umbral = float(np.round(net_solar_series.quantile(0.65), -1)) if peak_net > 0 else 0.0
@@ -144,11 +153,17 @@ cspec3.metric("CAPEX baterías", f"${bat_capex_usd:,.0f} USD")
 cspec4.metric("Modo de carga", "Solar (sin red)" if solar_only else "Solar + Red")
 
 # ── Run dispatch (with battery) and the solar-only baseline ───────────────────
-periods = classify_periods(demand_df["demand"].index)
-ev_batt = evaluate(calc, demand_df, solar_kw, cfg, periods=periods)
-ev_base = evaluate(calc, demand_df, solar_kw,
-                   {"capacity_kwh": 0.0, "power_kw": 0.0, "roundtrip_pct": cfg["roundtrip_pct"]},
-                   periods=periods)
+# These are two hour-by-hour dispatch models. Running both un-cached on every
+# interaction (and on every tab change) is what froze the page. Caching keeps
+# the baseline model from ever recomputing and returns instantly when the user
+# navigates away and back or moves an unrelated control.
+@st.cache_data(show_spinner="Calculando despacho de baterías…")
+def _eval_dispatch(region: str, demand_df: pd.DataFrame, solar_kw: pd.Series, cfg: dict) -> dict:
+    return evaluate(GDMTHCalculator(region=region), demand_df, solar_kw, cfg)
+
+_base_cfg = {"capacity_kwh": 0.0, "power_kw": 0.0, "roundtrip_pct": cfg["roundtrip_pct"]}
+ev_batt = _eval_dispatch(region, demand_df, solar_kw, cfg)
+ev_base = _eval_dispatch(region, demand_df, solar_kw, _base_cfg)
 
 annual_batt = ev_batt["annual"]
 annual_base = ev_base["annual"]

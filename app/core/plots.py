@@ -75,8 +75,14 @@ def generation_bar(df: pd.DataFrame, freq: str = "D") -> go.Figure:
     return fig
 
 
-def demand_injection_plot(demand_kw: pd.Series, solar_kw: pd.Series, net_kw: pd.Series) -> go.Figure:
-    """Dual-trace: original demand vs. net demand after solar injection."""
+def demand_injection_plot(demand_kw: pd.Series, solar_kw: pd.Series, net_kw: pd.Series,
+                          battery_window: tuple[int, int] = (18, 22)) -> go.Figure:
+    """Dual-trace: original demand vs. net demand after solar injection.
+
+    ``battery_window`` (start, end) is the hour-of-day range in which the battery
+    would discharge; it is shaded so the user can see — and vary — the hours that
+    the storage will act on, directly on the demand curve.
+    """
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
@@ -100,16 +106,18 @@ def demand_injection_plot(demand_kw: pd.Series, solar_kw: pd.Series, net_kw: pd.
         hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Solar: %{y:.1f} kW<extra></extra>",
     ))
 
-    # Shade Punta period (18-22h) as a background band for each day
-    if not demand_kw.empty:
+    # Shade the chosen battery discharge window as a background band per day
+    w0, w1 = int(min(battery_window)), int(max(battery_window))
+    win_label = f"Baterías {w0:02d}–{w1:02d}h"
+    if not demand_kw.empty and w1 > w0:
         dates = pd.Series(demand_kw.index.date).unique()
         for d in dates[:7]:  # limit bands to first 7 days for legibility
             fig.add_vrect(
-                x0=pd.Timestamp(d) + pd.Timedelta(hours=18),
-                x1=pd.Timestamp(d) + pd.Timedelta(hours=22),
-                fillcolor="rgba(197,57,41,0.07)",
+                x0=pd.Timestamp(d) + pd.Timedelta(hours=w0),
+                x1=pd.Timestamp(d) + pd.Timedelta(hours=w1),
+                fillcolor="rgba(46,125,50,0.08)",
                 line_width=0,
-                annotation_text="Punta" if d == dates[0] else "",
+                annotation_text=win_label if d == dates[0] else "",
                 annotation_position="top left",
             )
 

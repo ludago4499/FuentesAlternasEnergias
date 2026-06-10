@@ -10,8 +10,11 @@ import plotly.graph_objects as go
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.plots import demand_injection_plot
 from core.exporting import chart_with_export
+from core.state import keep_state
+from core.battery import load_batteries
 
 st.set_page_config(page_title="Demanda e Inyección — GDMTH Solar", page_icon="📊", layout="wide")
+keep_state()
 
 st.markdown("<h1 style='color:#0039A6;font-weight:700'>Demanda Industrial e Inyección Solar</h1>",
             unsafe_allow_html=True)
@@ -259,6 +262,44 @@ st.session_state["solar_aligned"] = solar_kw
 net_kw = (demand_df["demand"] - solar_kw) if allow_export else (demand_df["demand"] - solar_kw).clip(lower=0)
 st.session_state["net_demand"] = net_kw
 
+# ── Configuración de baterías (se decide aquí y se hereda en la página Baterías)
+st.markdown("### 🔋 Configuración de baterías (vista previa)")
+st.caption("Elige desde el inicio el modelo y las horas de descarga. Ambos se **heredan** en la "
+           "página de **Baterías**, para que veas la opción más conveniente sin volver a capturar nada.")
+
+_BATTERIES = load_batteries()
+_bat_labels = [
+    f"{b['brand']} {b['model']} — {b['usable_kwh']} kWh útil | {b['power_kw']} kW | "
+    f"{b['roundtrip_efficiency_pct']}% RT | ${b['usd_per_kwh']}/kWh"
+    for b in _BATTERIES
+]
+st.session_state.setdefault("battery_model_idx", 0)
+if st.session_state["battery_model_idx"] >= len(_BATTERIES):
+    st.session_state["battery_model_idx"] = 0
+
+cbm1, cbm2 = st.columns([3, 2])
+with cbm1:
+    bat_model_idx = st.selectbox(
+        "Modelo de batería preferido", range(len(_BATTERIES)),
+        format_func=lambda i: _bat_labels[i], key="battery_model_idx",
+        help="Tu elección se hereda en la página de Baterías.",
+    )
+with cbm2:
+    st.session_state.setdefault("battery_window", (18, 22))
+    bat_window = st.slider(
+        "Horas de descarga (hora del día)", min_value=0, max_value=24, step=1,
+        key="battery_window",
+        help="Por defecto el horario Punta (18–22h). Cámbialo para explorar otras franjas; "
+             "el análisis de baterías heredará esta selección.",
+    )
+
+_bat_sel = _BATTERIES[bat_model_idx]
+_peak_kw = float(demand_df["demand"].max())
+_sugg_units = int(np.clip(np.ceil(_peak_kw / max(_bat_sel["power_kw"], 1.0)) + 2, 1, 60))
+st.caption(f"💡 Sugerencia inicial: ~**{_sugg_units} unidades** de {_bat_sel['brand']} "
+           f"{_bat_sel['model']} para el pico de {_peak_kw:.0f} kW. Afina el arreglo y el ahorro "
+           "en la página **🔋 Baterías**.")
+
 # ── Period view selector ──────────────────────────────────────────────────────
 dates = sorted(set(demand_df.index.date))
 col_f1, col_f2 = st.columns(2)
@@ -293,7 +334,7 @@ m6.metric("Reducción energía",
 # ── Dual plot ─────────────────────────────────────────────────────────────────
 st.divider()
 st.markdown("### Curva de carga vs. inyección solar")
-fig = demand_injection_plot(dem_view, sol_view, net_view)
+fig = demand_injection_plot(dem_view, sol_view, net_view, battery_window=bat_window)
 chart_with_export(fig, key="dem_injection", filename="curva_carga_inyeccion")
 
 # ── Load duration curve ───────────────────────────────────────────────────────
