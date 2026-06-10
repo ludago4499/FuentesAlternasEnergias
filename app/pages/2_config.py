@@ -61,6 +61,7 @@ TZ_MAP = {
 
 def _init():
     defaults = {
+        "tariff_mode": "GDMTO",
         "city": "Monterrey, NL",
         "lat": 25.6866,
         "lon": -100.3161,
@@ -86,6 +87,20 @@ _init()
 
 st.markdown("<h1 style='color:#0039A6;font-weight:700'>Configuración del Sistema</h1>",
             unsafe_allow_html=True)
+
+# ── TARIFF MODE ───────────────────────────────────────────────────────────────
+st.markdown("## ⚡ Modo tarifario")
+st.radio(
+    "Tarifa CFE a analizar", ["GDMTO", "GDMTH"], key="tariff_mode", horizontal=True,
+    help="**GDMTO** — Gran Demanda en Media Tensión Ordinaria: tarifas planas sin horarios; "
+         "el flujo guiado vive en la página **principal** (Secciones 1–4). "
+         "**GDMTH** — Gran Demanda en Media Tensión Horaria: usa las páginas "
+         "Análisis Solar → Demanda → Economía → Baterías.",
+)
+if st.session_state["tariff_mode"] == "GDMTO":
+    st.caption("Modo GDMTO activo: el análisis económico y de respaldo se realiza en la página "
+               "**principal** (Vista Rápida → Secciones 2–4). Esta página sigue siendo útil para "
+               "elegir panel, ubicación fina y tipo de cambio.")
 
 # ── LOCATION ──────────────────────────────────────────────────────────────────
 st.markdown("## 📍 Ubicación")

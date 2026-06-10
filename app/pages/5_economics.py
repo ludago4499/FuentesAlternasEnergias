@@ -54,6 +54,16 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# ── Tariff-mode branch: this page is the GDMTH flow ───────────────────────────
+if st.session_state.get("tariff_mode", "GDMTO") == "GDMTO":
+    st.info(
+        "🔀 Modo tarifario actual: **GDMTO** (tarifas planas). Esta página calcula facturas "
+        "**GDMTH** (tarifa horaria). El análisis económico GDMTO está en la página **principal** "
+        "(Sección 2 — Tu consumo CFE). Cambia el modo a GDMTH en ⚙️ **Configuración** "
+        "si tu suministro es horario."
+    )
+    st.stop()
+
 # ── Check prerequisites ───────────────────────────────────────────────────────
 region = st.session_state.get("region", "Noreste")
 usd_mxn = st.session_state.get("usd_mxn", 17.5)

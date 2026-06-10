@@ -37,6 +37,16 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# ── Tariff-mode branch: peak shaving only makes sense under GDMTH ─────────────
+if st.session_state.get("tariff_mode", "GDMTO") == "GDMTO":
+    st.info(
+        "🔀 Modo tarifario actual: **GDMTO** (sin periodos horarios). El recorte de Punta no aplica: "
+        "bajo GDMTO la batería se justifica por **resiliencia ante apagones**. "
+        "Usa la página **principal** (Sección 3 — Resiliencia y Sección 4 — Continuidad). "
+        "Cambia el modo a GDMTH en ⚙️ **Configuración** para el análisis de peak shaving."
+    )
+    st.stop()
+
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 demand_df = st.session_state.get("demand_df")
 solar_kw = st.session_state.get("solar_aligned")
