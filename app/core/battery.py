@@ -51,6 +51,7 @@ def simulate_dispatch(
     discharge_threshold_kw: float | None = None,
     charge_periods: tuple[str, ...] = ("base",),
     init_soc_frac: float = 0.0,
+    reserve_kwh: float = 0.0,
 ) -> dict:
     """
     Greedy battery dispatch optimised for GDMTH peak shaving.
@@ -83,6 +84,9 @@ def simulate_dispatch(
         *discharge_hours* is None.
     discharge_threshold_kw : umbral (kW). Only demand above this level is shaved.
         None ⇒ shave as much as possible.
+    reserve_kwh : emergency (outage) reserve withheld from economic dispatch.
+        Discharge never takes the SoC below this level. Default 0 keeps the
+        original GDMTH peak-shaving behavior identical.
 
     Returns dict of Series: net_after (grid kW after battery), soc (kWh),
     charge_solar_kw, charge_grid_kw, charge_kw, discharge_kw.
@@ -129,12 +133,13 @@ def simulate_dispatch(
                 soc += c * eff
                 chg_solar[i] += c
 
-            # 2) Discharge inside the chosen window, down to the umbral if set
+            # 2) Discharge inside the chosen window, down to the umbral if set,
+            #    never dipping below the emergency reserve
             in_window = (h in dh) if dh is not None else (p in dis_set)
-            if in_window and load > 0.0 and soc > 0.0:
+            if in_window and load > 0.0 and soc > reserve_kwh:
                 want = (load - threshold) if threshold is not None else load
                 if want > 0.0:
-                    served = min(power_kw, want, soc * eff)
+                    served = min(power_kw, want, (soc - reserve_kwh) * eff)
                     if served > 0.0:
                         soc -= served / eff
                         load -= served
@@ -169,6 +174,7 @@ def _dispatch_kwargs(cfg: dict) -> dict:
         solar_only_charge=cfg.get("solar_only_charge", True),
         discharge_hours=cfg.get("discharge_hours"),
         discharge_threshold_kw=cfg.get("discharge_threshold_kw"),
+        reserve_kwh=cfg.get("reserve_kwh", 0.0),
     )
 
 

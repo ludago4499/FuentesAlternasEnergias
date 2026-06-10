@@ -25,6 +25,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from core.jensen import run_jensen_model, compute_pv_generation, energy_kwh, peak_sun_hours
 from core.gdmto import GDMTOCalculator, MONTH_ABBR_ES
+from core.resilience import propose_bess, kva_to_kw
 from core.plots import (irradiance_plot, monthly_demand_vs_solar_bar,
                         gdmto_savings_waterfall, typical_day_profile_plot,
                         monthly_savings_bar)
@@ -525,9 +526,69 @@ if s3_on:
         help="Duración del apagón que el banco de baterías debe cubrir alimentando la carga crítica.",
     )
     st.session_state["backup_hours"] = int(backup_hours)
-    st.info("🚧 Dimensionamiento del banco de respaldo en construcción — siguiente etapa del flujo.")
+
+    cl1, cl2, cl3 = st.columns([2, 1, 1])
+    load_val = cl1.number_input(
+        "Carga crítica a respaldar", min_value=0.0, value=20.0, step=1.0, format="%.1f",
+        help="Equipos que DEBEN seguir operando durante el apagón (refrigeración, "
+             "servidores, bombas, iluminación de seguridad…).",
+    )
+    load_unit = cl2.selectbox("Unidad", ["kW", "kVA"], key="s3_load_unit")
+    if load_unit == "kVA":
+        fp_load = cl3.number_input("FP de la carga (%)", min_value=50.0, max_value=100.0,
+                                   value=89.89, step=0.01, format="%.2f", key="s3_fp_load")
+        p_crit_kw = kva_to_kw(load_val, fp_load)
+        st.caption(f"kW = kVA × FP/100 → **{p_crit_kw:.1f} kW**")
+    else:
+        p_crit_kw = load_val
+    st.session_state["critical_load_kw"] = float(p_crit_kw)
+
+    if p_crit_kw <= 0:
+        st.warning("Ingresa una carga crítica mayor a 0 para dimensionar el banco de baterías.")
+        st.session_state["bess_proposal"] = None
+    else:
+        usd_mxn_s3 = st.session_state.get("usd_mxn", 17.5)
+        prop = propose_bess(float(p_crit_kw), float(backup_hours), usd_mxn=usd_mxn_s3)
+        best = prop["best"]
+        st.session_state["bess_proposal"] = best
+
+        st.markdown("#### 🏆 Propuesta automática (menor CAPEX que cumple energía y potencia)")
+        with st.container(border=True):
+            st.markdown(f"**{best['brand']} {best['model']}** · {best['chemistry']} · "
+                        f"requiere **{best['e_req_kwh']:,.1f} kWh** para {backup_hours} h "
+                        f"de respaldo a {p_crit_kw:,.1f} kW")
+            pc1, pc2, pc3, pc4 = st.columns(4)
+            pc1.metric("Unidades", f"{best['units']}")
+            pc2.metric("Energía útil", f"{best['total_usable_kwh']:,.1f} kWh")
+            pc3.metric("Potencia", f"{best['total_power_kw']:,.1f} kW")
+            pc4.metric("CAPEX", f"$ {best['capex_mxn']:,.2f} MXN",
+                       help=f"$ {best['capex_usd']:,.0f} USD × TDC {usd_mxn_s3:.2f}")
+            pc5, pc6, pc7 = st.columns(3)
+            pc5.metric("Ciclos", f"{best['cycles']:,}",
+                       help=f"Banda típica LiFePO4: {best['cycle_band']} ciclos.")
+            pc6.metric("Vida (ciclado diario)", f"{best['life_years_daily_cycling']:.1f} años",
+                       help=best["life_note"])
+            pc7.metric("DoD / Eficiencia RT",
+                       f"{best['dod_pct']:.0f}% / {best['roundtrip_efficiency_pct']:.0f}%")
+            st.caption("ℹ️ " + best["life_note"])
+
+        with st.expander("🔍 Ver alternativas del catálogo"):
+            alt_rows = [{
+                "Modelo": f"{o['brand']} {o['model']}",
+                "Química": o["chemistry"],
+                "Unidades": o["units"],
+                "Energía útil (kWh)": f"{o['total_usable_kwh']:,.1f}",
+                "Potencia (kW)": f"{o['total_power_kw']:,.1f}",
+                "Ciclos": f"{o['cycles']:,}",
+                "Vida est. (años)": f"{o['life_years_daily_cycling']:.1f}",
+                "CAPEX (MXN)": f"$ {o['capex_mxn']:,.2f}",
+            } for o in prop["options"]]
+            st.dataframe(pd.DataFrame(alt_rows), use_container_width=True, hide_index=True)
+            st.caption("Todas las opciones cumplen ambas restricciones: energía "
+                       "(E_req = P·h / (DoD × η_inv)) y potencia (P ≥ carga crítica).")
 else:
     st.session_state["backup_hours"] = 0
+    st.session_state["bess_proposal"] = None
     st.caption("Activa esta sección si los cortes de CFE afectan tu operación.")
 
 # ══════════════════════════════════════════════════════════════════════════════
