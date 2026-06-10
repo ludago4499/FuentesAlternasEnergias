@@ -75,7 +75,7 @@ col_d1, col_d2, col_res = st.columns([2, 2, 1])
 start_dt = col_d1.date_input("Fecha inicio", value=datetime.date(2024, 1, 1),
                               min_value=datetime.date(2020, 1, 1),
                               max_value=datetime.date(2025, 12, 31))
-end_dt = col_d2.date_input("Fecha fin", value=datetime.date(2024, 1, 31),
+end_dt = col_d2.date_input("Fecha fin", value=datetime.date(2024, 6, 30),
                              min_value=datetime.date(2020, 1, 1),
                              max_value=datetime.date(2025, 12, 31))
 resolution = col_res.radio("Resolución temporal", ["Horaria (1 h)", "Quinceminutal (15 min)"],

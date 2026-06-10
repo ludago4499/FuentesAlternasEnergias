@@ -634,15 +634,15 @@ def irradiance_comparison_plot(
     fig.add_trace(go.Scatter(x=cs.index, y=cs["ghi"], name="GHI despejado",
                              line=dict(color=TEC_BLUE, width=2)), row=1, col=1)
     fig.add_trace(go.Scatter(x=act.index, y=act["ghi"], name="GHI real",
-                             line=dict(color=SOLAR_YELLOW, width=2),
+                             line=dict(color=SOLAR_YELLOW, width=2, dash="dot"),
                              fill="tonexty", fillcolor="rgba(255,179,0,0.18)"), row=1, col=1)
 
-    # POA
+    # POA — clear-sky solid, real always dotted
     fig.add_trace(go.Scatter(x=cs.index, y=cs["poa_global"], name="POA despejado",
-                             line=dict(color=TEC_BLUE, width=2, dash="dot"),
+                             line=dict(color=TEC_BLUE, width=2),
                              showlegend=False), row=2, col=1)
     fig.add_trace(go.Scatter(x=act.index, y=act["poa_global"], name="POA real",
-                             line=dict(color=SOLAR_ORANGE, width=2),
+                             line=dict(color=SOLAR_ORANGE, width=2, dash="dot"),
                              fill="tonexty", fillcolor="rgba(245,124,0,0.18)",
                              showlegend=False), row=2, col=1)
 
