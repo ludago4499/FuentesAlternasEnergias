@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.gdmth import GDMTHCalculator, classify_period, get_season
 from core.plots import savings_waterfall, energy_pie, monthly_savings_bar
+from core.exporting import chart_with_export
 
 st.set_page_config(page_title="Economía GDMTH — Solar", page_icon="💰", layout="wide")
 
@@ -109,9 +110,35 @@ with st.container(border=True):
     c4.metric("CAPEX total (MXN)", f"${total_capex_mxn:,.0f} MXN", help=f"TDC: {usd_mxn} MXN/USD")
 
 # ── Cálculo Inicial ───────────────────────────────────────────────────────────
+# Si el usuario llega directo desde Configuración (Guardar) sin pasar por la página
+# de Demanda, generamos un perfil industrial sintético por defecto para que el
+# análisis económico SIEMPRE pueda abrirse. Puede afinarlo en "Demanda e Inyección".
 if demand_df is None:
-    st.warning("⚠️ Carga la curva de demanda en la página **Demanda e Inyección** primero para poder realizar el análisis.")
-    st.stop()
+    st.info(
+        "ℹ️ No se ha cargado una curva de demanda, por lo que se generó un **perfil "
+        "industrial sintético por defecto** (Manufactura, 600 kW pico) para que puedas "
+        "ver el análisis. Para resultados a tu medida, captura o sube tu curva en la "
+        "página **📊 Demanda e Inyección**."
+    )
+    _tz = st.session_state.get("tz", "America/Monterrey")
+    _shape = np.array([0.42, 0.40, 0.39, 0.38, 0.39, 0.43,
+                       0.65, 0.82, 0.95, 0.98, 1.00, 0.99,
+                       0.97, 0.96, 0.97, 0.96, 0.95, 0.96,
+                       0.98, 1.00, 0.99, 0.95, 0.80, 0.55])
+    if solar_kw is not None and len(solar_kw) > 0:
+        _idx = solar_kw.index
+    else:
+        _idx = pd.date_range("2024-01-01", "2025-01-01", freq="h", tz=_tz, inclusive="left")
+    _rng = np.random.default_rng(42)
+    _vals = []
+    for _ts in _idx:
+        _wf = 0.45 if _ts.weekday() >= 5 else 1.0
+        _sf = 1.08 if _ts.month in (4, 5, 6, 7, 8, 9, 10) else 1.0
+        _noise = min(1.15, max(0.85, 1.0 + _rng.normal(0, 0.035)))
+        _vals.append(600.0 * _shape[_ts.hour] * _wf * _sf * _noise)
+    demand_df = pd.DataFrame({"demand": _vals}, index=_idx)
+    st.session_state["demand_df"] = demand_df
+    st.session_state.setdefault("demand_source", "Sintético — muestra automática (Economía)")
 
 calc = GDMTHCalculator(region=region)
 
@@ -206,19 +233,19 @@ with st.container(border=True):
     
     st.markdown(f"#### Desglose de ahorros: {month_sel}")
     fig_wf = savings_waterfall(sel_result)
-    st.plotly_chart(fig_wf, use_container_width=True)
+    chart_with_export(fig_wf, key="eco_waterfall", filename="desglose_ahorros")
 
     col_pie, col_bar = st.columns(2)
     with col_pie:
         st.markdown("#### Consumo por período (Con FV)")
         fig_pie = energy_pie(sel_result)
-        st.plotly_chart(fig_pie, use_container_width=True)
+        chart_with_export(fig_pie, key="eco_pie", filename="consumo_por_periodo")
 
     with col_bar:
         if len(monthly_results) > 1:
             st.markdown("#### Comparación Mensual Histórica")
             fig_monthly = monthly_savings_bar(monthly_results)
-            st.plotly_chart(fig_monthly, use_container_width=True)
+            chart_with_export(fig_monthly, key="eco_monthly", filename="comparacion_mensual")
 
 # ── Multi-year projection ─────────────────────────────────────────────────────
 st.write("")
@@ -257,7 +284,7 @@ with st.container(border=True):
         margin=dict(t=10, b=60),
         hovermode="x unified",
     )
-    st.plotly_chart(fig_proj, use_container_width=True)
+    chart_with_export(fig_proj, key="eco_projection", filename="proyeccion_flujo_efectivo")
 
     npv = sum(net / (1 + 0.10) ** yr for yr, net in zip(years, annual_net_savings)) - total_capex_mxn
     roi_pct = (sum(annual_net_savings) / total_capex_mxn * 100) if total_capex_mxn > 0 else 0

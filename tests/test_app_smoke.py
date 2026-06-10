@@ -128,13 +128,24 @@ def test_pages_warn_and_stop_under_gdmto(page):
     assert len(at.info) >= 1          # the GDMTO redirect notice
 
 
-@pytest.mark.parametrize("page", ["5_economics.py", "6_baterias.py"])
-def test_pages_gdmth_path_reaches_demand_warning(page):
-    at = AppTest.from_file(str(APP_DIR / "pages" / page), default_timeout=60)
+def test_baterias_gdmth_path_reaches_demand_warning():
+    # Baterías still requires an explicit demand curve and warns if missing.
+    at = AppTest.from_file(str(APP_DIR / "pages" / "6_baterias.py"), default_timeout=60)
     at.session_state["tariff_mode"] = "GDMTH"
     at.run()
     assert not at.exception
-    assert len(at.warning) >= 1       # legacy "carga la demanda" guard
+    assert len(at.warning) >= 1       # "carga la demanda" guard
+
+
+def test_economics_gdmth_path_autogenerates_demand():
+    # Economía no longer dead-ends: with no demand curve it synthesises a default
+    # profile (info notice) so the analysis page always opens.
+    at = AppTest.from_file(str(APP_DIR / "pages" / "5_economics.py"), default_timeout=60)
+    at.session_state["tariff_mode"] = "GDMTH"
+    at.run()
+    assert not at.exception
+    assert at.session_state["demand_df"] is not None   # fallback profile created
+    assert len(at.info) >= 1                            # "perfil sintético" notice
 
 
 def test_config_page_with_residential_tool():

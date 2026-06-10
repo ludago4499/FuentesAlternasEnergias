@@ -69,7 +69,7 @@ def _init():
         "altitude": 540.0,
         "tz": "America/Monterrey",
         "panel_id": PANELS[0]["id"],
-        "n_panels": 100,
+        "n_panels": 30,
         "tilt": 20.0,
         "azimuth": 0.0,
         # "battery_id": BATTERIES[0]["id"],   # BATTERY — disabled for now
@@ -77,7 +77,6 @@ def _init():
         # "use_battery": False,
         "region": "Noreste",
         "usd_mxn": 17.5,
-        "panel_justification": "",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -109,6 +108,7 @@ with st.expander("🏠 Tarifas residenciales 1A–1F — bloques y umbral DAC", 
     _sys.path.insert(0, str(Path(__file__).parent.parent))
     from core.residential import classify, BLOCK_LABELS, TARIFFS as RES_TARIFFS, LIMITS as RES_LIMITS
     from core.plots import residential_blocks_bar
+    from core.exporting import chart_with_export
 
     st.caption("Acumulador de bloques **por bimestre**: el consumo llena Básico → Intermedio → "
                "Verano 1 → Verano 2 y el resto se factura como **Excedente**. Si superas el "
@@ -119,8 +119,8 @@ with st.expander("🏠 Tarifas residenciales 1A–1F — bloques y umbral DAC", 
                                value=900.0, step=10.0, format="%.0f")
 
     res = classify(res_kwh, res_tarifa)
-    st.plotly_chart(residential_blocks_bar(res["blocks"], res["dac_kwh_bimestre"]),
-                    use_container_width=True)
+    chart_with_export(residential_blocks_bar(res["blocks"], res["dac_kwh_bimestre"]),
+                      key="res_blocks", filename="bloques_residenciales")
 
     _lims = RES_LIMITS[res_tarifa]
     _rows = []
@@ -310,21 +310,25 @@ st.caption("Azimut: **0°** = Sur (óptimo México) | **−90°** = Este | **+90
 system_kwp = (n_panels * panel["wp"]) / 1000.0
 capex_usd = n_panels * panel["wp"] * panel["usd_per_w"]
 
-st.info(
+col_info, col_help = st.columns([5, 1])
+col_info.info(
     f"**Tamaño del sistema:** {system_kwp:.2f} kWp  |  "
     f"**CAPEX estimado paneles:** ${capex_usd:,.0f} USD"
 )
-
-justification = st.text_area(
-    "Justificación técnica de la selección de panel",
-    value=st.session_state.get("panel_justification") or (
-        f"Se seleccionó el panel {panel['brand']} {panel['model']} por su alta eficiencia "
-        f"de {panel['efficiency_pct']}%, certificación Tier {panel['tier']}, y garantía de "
-        f"{panel['warranty_years']} años. La tecnología monocristalina PERC ofrece mejor "
-        f"rendimiento en condiciones de irradiancia difusa, relevante para el sitio seleccionado."
-    ),
-    height=100,
-)
+with col_help.popover("ℹ️ ¿Qué es el CAPEX?", use_container_width=True):
+    st.markdown(
+        "**CAPEX** (*Capital Expenditure*) es la **inversión inicial de capital** "
+        "necesaria para comprar e instalar el sistema fotovoltaico.\n\n"
+        "El **CAPEX estimado de paneles** que se muestra arriba considera únicamente "
+        "el costo de los módulos solares:\n\n"
+        "$$\\text{CAPEX}_{paneles} = N_{paneles} \\times P_{pico}\\,[\\text{W}] "
+        "\\times \\text{precio}\\,[\\text{USD/W}]$$\n\n"
+        f"- **Paneles:** {n_panels:,} × {panel['wp']} Wp × ${panel['usd_per_w']:.2f}/W "
+        f"= **${capex_usd:,.0f} USD**\n"
+        "- No incluye estructura, inversores, cableado ni mano de obra "
+        "(esos se suman como *factor de instalación* en la página de Economía).\n"
+        "- Tampoco incluye baterías ni OPEX (gastos de operación y mantenimiento)."
+    )
 
 # ── BATTERY SELECTION — disabled for now, uncomment to re-enable ──────────────
 # st.divider()
@@ -388,7 +392,6 @@ if st.button("Guardar configuración", type="primary", use_container_width=True)
         # "battery_kwh": bat_kwh,
         "region": region,
         "usd_mxn": usd_mxn,
-        "panel_justification": justification,
     })
     st.success("Configuración guardada. Puedes avanzar a la página de Análisis Solar.")
     st.balloons()

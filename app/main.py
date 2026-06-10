@@ -29,6 +29,7 @@ from core.resilience import propose_bess, kva_to_kw, continuity_cashflows
 from core.plots import (irradiance_plot, monthly_demand_vs_solar_bar,
                         gdmto_savings_waterfall, typical_day_profile_plot,
                         monthly_savings_bar, continuity_cashflow_bar)
+from core.exporting import chart_with_export
 
 st.set_page_config(
     page_title="Streger Solar — Análisis CFE",
@@ -253,7 +254,7 @@ q2.metric("Equivalente mensual", f"{kwh_day_panel * 30:.0f} kWh/mes",
 q3.metric("Horas solares pico", f"{peak_sun_hours(df_day):.1f} h")
 q4.metric("POA máxima", f"{float(df_day['poa_global'].max()):.0f} W/m²")
 
-st.plotly_chart(irradiance_plot(df_day), use_container_width=True)
+chart_with_export(irradiance_plot(df_day), key="s1_irradiance", filename="irradiancia_dia")
 st.caption(f"Día representativo: {_TYPICAL_DAY} (equinoccio) · Cielo despejado Ineichen · "
            f"Transposición isótropa (Jensen) · Inclinación {tilt}° · Azimut {azimuth:+d}° (0=Sur)")
 
@@ -410,8 +411,8 @@ if s2_on:
     st.markdown("#### ⚖️ Balance mensual: demanda vs generación")
     st.caption("Generación *real*: modelo horario Jensen con nubosidad estocástica AR(1) "
                "(semilla fija) y derating por temperatura NOCT.")
-    st.plotly_chart(monthly_demand_vs_solar_bar(MONTH_ABBR_ES, demand_monthly, gen_monthly),
-                    use_container_width=True)
+    chart_with_export(monthly_demand_vs_solar_bar(MONTH_ABBR_ES, demand_monthly, gen_monthly),
+                      key="s2_balance", filename="balance_demanda_generacion")
     bal1, bal2, bal3 = st.columns(3)
     bal1.metric("Demanda anual", f"{total_dem:,.0f} kWh")
     bal2.metric("Generación FV anual", f"{total_gen:,.0f} kWh")
@@ -426,9 +427,9 @@ if s2_on:
         shape_day_kwh = float(_DAY_SHAPE.sum())
         scale = kwh_m / (shape_day_kwh * _DAYS_IN_MONTH[m_idx]) if shape_day_kwh > 0 else 0.0
         demand_24 = (_DAY_SHAPE * scale).tolist()
-        st.plotly_chart(typical_day_profile_plot(demand_24, gen_profile[m_idx].tolist(),
-                                                 month_label=sel_mes),
-                        use_container_width=True)
+        chart_with_export(typical_day_profile_plot(demand_24, gen_profile[m_idx].tolist(),
+                                                   month_label=sel_mes),
+                          key="s2_perfil_dia", filename="perfil_dia_tipico")
         st.caption("Perfil sintético (arquetipo industrial) escalado para que el mes sume "
                    f"{kwh_m:,.0f} kWh. La **demanda facturable** es la capturada en tu recibo "
                    f"({float(cfe_history['demanda_kw'].iloc[m_idx]):,.1f} kW), no el pico del perfil.")
@@ -479,12 +480,14 @@ if s2_on:
                    if annual["orig_total_mxn"] > 0 else None)
         fa4.metric("Tarifa", calc_gdmto.name, help="Componentes calibrados al recibo real.")
 
-        st.plotly_chart(monthly_savings_bar(proj["monthly"]), use_container_width=True)
+        chart_with_export(monthly_savings_bar(proj["monthly"]),
+                          key="s2_monthly_savings", filename="ahorro_mensual_gdmto")
 
         sel_mes_wf = st.selectbox("Mes para el desglose en cascada", MONTH_ABBR_ES,
                                   index=4, key="s2_mes_waterfall")
         bill_sel = proj["monthly"][MONTH_ABBR_ES.index(sel_mes_wf)]
-        st.plotly_chart(gdmto_savings_waterfall(bill_sel), use_container_width=True)
+        chart_with_export(gdmto_savings_waterfall(bill_sel),
+                          key="s2_waterfall", filename="cascada_ahorro_gdmto")
 
         with st.expander("📄 Ver componentes de la factura por mes"):
             rows = []
@@ -665,11 +668,11 @@ if s4_on:
                    delta="Rentable" if cf_sin["npv_mxn"] > 0 else "No rentable",
                    delta_color="normal" if cf_sin["npv_mxn"] > 0 else "inverse")
 
-        st.plotly_chart(
+        chart_with_export(
             continuity_cashflow_bar(cf_con["months"], cf_con["monthly_pv_flows"],
                                     cf_sin["monthly_pv_flows"],
                                     cf_con["cumulative_pv"], cf_sin["cumulative_pv"]),
-            use_container_width=True,
+            key="s4_continuity_cashflow", filename="flujo_continuidad",
         )
         st.caption("Flujos mensuales **a valor presente** (mes 0 = CAPEX inicial negativo). "
                    "VPN con el mismo patrón de descuento que la optimización de baterías: "

@@ -13,6 +13,7 @@ from core.plots import (irradiance_plot, generation_bar, poa_heatmap,
                          irradiance_comparison_plot, losses_waterfall_chart,
                          poa_exceedance_plot, efficiency_breakdown_table,
                          sunrise_sunset_pattern_plot)
+from core.exporting import chart_with_export
 
 st.set_page_config(page_title="Análisis Solar — GDMTH Solar", page_icon="🌞", layout="wide")
 
@@ -32,7 +33,7 @@ azimuth_pvlib = (180.0 + azimuth_user) % 360.0        # pvlib: 0=Norte, 90=Este,
 tz = st.session_state.get("tz", "America/Monterrey")
 altitude = st.session_state.get("altitude", 500.0)
 system_kwp = st.session_state.get("system_kwp", 50.0)
-n_panels_cfg = st.session_state.get("n_panels", 100)
+n_panels_cfg = st.session_state.get("n_panels", 30)
 panel = st.session_state.get("panel", {"wp": 580, "efficiency_pct": 22.3,
                                         "temp_coeff_pmax": -0.30, "noct": 43, "area_m2": 2.583})
 
@@ -104,7 +105,7 @@ with st.expander("Fuente de datos meteorológicos", expanded=True):
     weather_label = st.radio(
         "Fuente de datos",
         list(_SOURCE_LABELS.keys()),
-        index=0,
+        index=1,  # Variabilidad estocástica (AR-1) por defecto
         horizontal=True,
         help=(
             "**Cielo despejado**: Ineichen sin nubes. "
@@ -337,7 +338,7 @@ if run_btn or "irradiance_df" in st.session_state:
         selected_date = st.select_slider("Selecciona día", options=available_dates,
                                           value=available_dates[0])
         fig_comp = irradiance_comparison_plot(df, df_clearsky, selected_date=str(selected_date))
-        st.plotly_chart(fig_comp, use_container_width=True)
+        chart_with_export(fig_comp, key="sol_irr_comp", filename="irradiancia_comparacion")
 
         st.divider()
         st.markdown("### Generación FV agregada")
@@ -346,13 +347,13 @@ if run_btn or "irradiance_df" in st.session_state:
         df_energy = df.copy()
         df_energy["pv_kw"] = df_energy["pv_kw"] * _dt_h
         fig_bar = generation_bar(df_energy, freq=freq_map_agg[agg_opt])
-        st.plotly_chart(fig_bar, use_container_width=True)
+        chart_with_export(fig_bar, key="sol_gen_bar", filename="generacion_agregada")
 
         if n_days <= 62 and freq == "h":
             st.divider()
             st.markdown("### Mapa de calor — POA horaria (W/m²)")
             fig_heat = poa_heatmap(df)
-            st.plotly_chart(fig_heat, use_container_width=True)
+            chart_with_export(fig_heat, key="sol_heat", filename="poa_heatmap")
 
         st.divider()
         col_dl1, col_dl2 = st.columns(2)
@@ -369,7 +370,7 @@ if run_btn or "irradiance_df" in st.session_state:
     with tab2:
         st.markdown("### Comparación cielo despejado vs real — rango completo")
         fig_full = irradiance_comparison_plot(df, df_clearsky, selected_date=None)
-        st.plotly_chart(fig_full, use_container_width=True)
+        chart_with_export(fig_full, key="sol_full", filename="poa_patron_anual")
 
         st.divider()
         st.markdown("### Curva de excedencia y distribución de POA")
@@ -384,12 +385,12 @@ if run_btn or "irradiance_df" in st.session_state:
             ec4.metric("POA despejado P90", f"{losses.get('poa_clearsky_p90_wm2', 0):.0f} W/m²")
 
         fig_exc = poa_exceedance_plot(df, df_clearsky)
-        st.plotly_chart(fig_exc, use_container_width=True)
+        chart_with_export(fig_exc, key="sol_exc", filename="poa_excedencia")
 
         st.divider()
         st.markdown("### Patrón estacional — disponibilidad solar (hora × día)")
         fig_sun = sunrise_sunset_pattern_plot(df)
-        st.plotly_chart(fig_sun, use_container_width=True)
+        chart_with_export(fig_sun, key="sol_sun", filename="amanecer_atardecer")
 
     # ── TAB 3: Pérdidas ───────────────────────────────────────────────────────
     with tab3:
@@ -413,12 +414,12 @@ if run_btn or "irradiance_df" in st.session_state:
                         delta=f"-{losses.get('loss_inverter_kwh', 0):,.0f} kWh", delta_color="inverse")
 
             fig_wf = losses_waterfall_chart(losses)
-            st.plotly_chart(fig_wf, use_container_width=True)
+            chart_with_export(fig_wf, key="sol_losses_wf", filename="cadena_perdidas")
 
             st.divider()
             st.markdown("### Eficiencia por componente")
             fig_tbl = efficiency_breakdown_table(losses)
-            st.plotly_chart(fig_tbl, use_container_width=True)
+            chart_with_export(fig_tbl, key="sol_eff_tbl", filename="eficiencia_componentes")
 
             eff_col1, eff_col2 = st.columns(2)
             eff_col1.metric(
@@ -435,20 +436,24 @@ if run_btn or "irradiance_df" in st.session_state:
             st.info("Ejecuta el modelo para ver el análisis de pérdidas.")
 
         with st.expander("Metodología de pérdidas"):
-            st.markdown(r"""
-            La cadena de pérdidas sigue el orden:
-
-            $$E_{CS} \xrightarrow{-\text{nubes}} E_{cloud} \xrightarrow{-\text{temp}} E_{temp}
-            \xrightarrow{-\text{suciedad}} E_{soil} \xrightarrow{-\text{cableado}} E_{wire}
-            \xrightarrow{-\text{inversor}} E_{AC}$$
-
-            - **Nubosidad** — reducción de GHI/DNI/DHI por nubosidad real o estocástica (kt × irradiancia)
-            - **Temperatura** — derating NOCT: $T_{cell} = T_{amb} + (NOCT-20) \cdot G_{POA}/800$;
-              pérdida = $\alpha_{P_{max}}(T_{cell}-25)$
-            - **Suciedad** — pérdida fija configurable (default 2%)
-            - **Cableado DC** — pérdida fija configurable (default 1.5%)
-            - **Inversor** — eficiencia fija 96%
-            """)
+            st.markdown("La cadena de pérdidas sigue el orden:")
+            st.latex(
+                r"E_{CS} \xrightarrow{-\text{nubes}} E_{cloud} "
+                r"\xrightarrow{-\text{temp}} E_{temp} "
+                r"\xrightarrow{-\text{suciedad}} E_{soil} "
+                r"\xrightarrow{-\text{cableado}} E_{wire} "
+                r"\xrightarrow{-\text{inversor}} E_{AC}"
+            )
+            st.markdown(
+                "- **Nubosidad** — reducción de GHI/DNI/DHI por nubosidad real o "
+                "estocástica (kt × irradiancia)\n"
+                "- **Temperatura** — derating NOCT: "
+                r"$T_{cell} = T_{amb} + (NOCT-20)\cdot G_{POA}/800$; "
+                r"pérdida $= \alpha_{P_{max}}\,(T_{cell}-25)$" "\n"
+                "- **Suciedad** — pérdida fija configurable (default 2%)\n"
+                "- **Cableado DC** — pérdida fija configurable (default 1.5%)\n"
+                "- **Inversor** — eficiencia fija 96%"
+            )
 
     # ── TAB 4: Disponibilidad solar ───────────────────────────────────────────
     with tab4:
@@ -476,7 +481,7 @@ if run_btn or "irradiance_df" in st.session_state:
             height=400,
             margin=dict(t=20, b=40),
         )
-        st.plotly_chart(fig_box, use_container_width=True)
+        chart_with_export(fig_box, key="sol_box", filename="poa_distribucion_mensual")
 
         st.divider()
         st.markdown("### Horas solares útiles por mes (POA > 200 W/m²)")
@@ -496,7 +501,7 @@ if run_btn or "irradiance_df" in st.session_state:
             height=320,
             margin=dict(t=10, b=40),
         )
-        st.plotly_chart(fig_uh, use_container_width=True)
+        chart_with_export(fig_uh, key="sol_useful_hours", filename="horas_solares_utiles")
 
     # ── Methodology note ──────────────────────────────────────────────────────
     with st.expander("Notas metodológicas"):

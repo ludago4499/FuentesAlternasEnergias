@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.plots import demand_injection_plot
+from core.exporting import chart_with_export
 
 st.set_page_config(page_title="Demanda e Inyección — GDMTH Solar", page_icon="📊", layout="wide")
 
@@ -159,7 +160,7 @@ with tab_gen:
                             xaxis=dict(title="Hora del día", tickvals=list(range(0, 24, 2))),
                             yaxis_title="kW", margin=dict(t=10, b=30),
                             showlegend=False)
-    st.plotly_chart(fig_prev, use_container_width=True)
+    chart_with_export(fig_prev, key="dem_preview", filename="perfil_tipico_preview")
 
     st.markdown(f"""
     | Parámetro | Valor |
@@ -293,7 +294,7 @@ m6.metric("Reducción energía",
 st.divider()
 st.markdown("### Curva de carga vs. inyección solar")
 fig = demand_injection_plot(dem_view, sol_view, net_view)
-st.plotly_chart(fig, use_container_width=True)
+chart_with_export(fig, key="dem_injection", filename="curva_carga_inyeccion")
 
 # ── Load duration curve ───────────────────────────────────────────────────────
 st.divider()
@@ -313,7 +314,7 @@ fig_ldc.update_layout(template="plotly_white",
                        yaxis_title="Demanda (kW)", height=360,
                        legend=dict(orientation="h"), hovermode="x unified",
                        margin=dict(t=10, b=40))
-st.plotly_chart(fig_ldc, use_container_width=True)
+chart_with_export(fig_ldc, key="dem_ldc", filename="curva_duracion_carga")
 
 # ── Hourly stats table ────────────────────────────────────────────────────────
 st.divider()

@@ -13,6 +13,7 @@ from core.plots import (
     battery_cost_comparison_bar,
     battery_optimization_plot,
 )
+from core.exporting import chart_with_export
 
 st.set_page_config(page_title="Baterías — GDMTH Solar", page_icon="🔋", layout="wide")
 
@@ -249,7 +250,7 @@ with st.container(border=True):
         threshold_kw=cfg["discharge_threshold_kw"],
         discharge_hours=discharge_hours,
     )
-    st.plotly_chart(fig_disp, use_container_width=True)
+    chart_with_export(fig_disp, key="bat_dispatch", filename="despacho_bateria")
     st.caption("🔴 Demanda original · 🟠 Neta con FV · 🔵 Neta con FV+Batería (rellena) · 🟢 SoC · "
                "🟩 línea = umbral · banda = ventana horaria de descarga.")
 
@@ -258,7 +259,7 @@ st.write("")
 with st.container(border=True):
     st.markdown("<h3 class='section-title'>💸 Cambio en el gasto de energía</h3>", unsafe_allow_html=True)
     fig_cost = battery_cost_comparison_bar(ev_base["monthly"], ev_batt["monthly"])
-    st.plotly_chart(fig_cost, use_container_width=True)
+    chart_with_export(fig_cost, key="bat_cost", filename="gasto_energia_comparacion")
 
     g1, g2, g3 = st.columns(3)
     g1.metric("Factura anual sin FV", f"${annual_base.get('orig_total_mxn', 0):,.0f} MXN")
@@ -321,8 +322,8 @@ with st.container(border=True):
     opt = st.session_state.get("battery_opt")
     if opt:
         best = opt["best"]
-        st.plotly_chart(battery_optimization_plot(opt["rows"], best["units"]),
-                        use_container_width=True)
+        chart_with_export(battery_optimization_plot(opt["rows"], best["units"]),
+                          key="bat_optimization", filename="optimizacion_baterias")
 
         if best["units"] == 0:
             st.warning("Con los parámetros actuales, **ninguna batería es rentable** (VPN máximo en 0 unidades). "
