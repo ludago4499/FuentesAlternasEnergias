@@ -91,10 +91,7 @@ if end_dt < start_dt:
 n_days = (end_dt - start_dt).days + 1
 n_periods_expected = n_days * (96 if freq == "15min" else 24)
 
-if n_days > 366:
-    st.warning("El rango máximo recomendado es 1 año.")
-if freq == "15min" and n_days > 31:
-    st.warning("Resolución quinceminutal con más de 31 días puede ser lenta.")
+
 
 st.caption(f"Períodos esperados: **{n_periods_expected:,}** | N anual equivalente: **{'35,040' if freq=='15min' else '8,760'}**")
 
