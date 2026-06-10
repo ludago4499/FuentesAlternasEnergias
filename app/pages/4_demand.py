@@ -383,6 +383,63 @@ custom_metric(m6, "Reducción energía",
           f"{(total_dem_kwh - float(net_view.sum())) / total_dem_kwh * 100:.1f} %"
           if total_dem_kwh > 0 else "—")
 
+# ── Consumo mensual y facturación ──────────────────────────────────────────────
+st.divider()
+st.markdown("### 📋 Consumo mensual y facturación")
+st.caption("Desglose mensual de energía del perfil completo más los datos de facturación "
+           "(factor de potencia y costo medio) para estimar el gasto — más detallado que la "
+           "captura rápida de la página principal.")
+
+_MONTH_ABBR = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+               "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+dem_monthly = demand_df["demand"].resample("ME").sum()           # kW·h (Δt = 1 h)
+net_monthly = net_kw.clip(lower=0).resample("ME").sum()
+
+bf1, bf2 = st.columns(2)
+fp_pct = bf1.number_input(
+    "Factor de potencia (%)", min_value=50.0, max_value=100.0,
+    value=float(st.session_state.get("demand_fp_pct", 90.0)), step=0.01, format="%.2f",
+    help="FP de la instalación: kVA = kW ÷ (FP/100). Por debajo de 90% CFE aplica recargo.",
+)
+costo_kwh = bf2.number_input(
+    "Costo medio ($/kWh) — opcional", min_value=0.0,
+    value=float(st.session_state.get("demand_costo_kwh",
+                                     st.session_state.get("costo_promedio_kwh", 2.67))),
+    step=0.01, format="%.2f",
+    help="Costo medio por kWh para estimar el gasto mensual. Déjalo en 0 si no lo necesitas.",
+)
+st.session_state["demand_fp_pct"] = float(fp_pct)
+st.session_state["demand_costo_kwh"] = float(costo_kwh)
+
+avg_month_kwh = float(dem_monthly.mean()) if len(dem_monthly) else 0.0
+peak_demand_kw = float(demand_df["demand"].max())
+peak_kva = peak_demand_kw / (fp_pct / 100.0) if fp_pct > 0 else 0.0
+
+mm1, mm2, mm3, mm4 = st.columns(4)
+custom_metric(mm1, "Consumo mensual prom.", f"{avg_month_kwh:,.0f} kWh")
+custom_metric(mm2, "Demanda pico", f"{peak_demand_kw:,.1f} kW")
+custom_metric(mm3, "Demanda aparente", f"{peak_kva:,.1f} kVA", help="kVA = kW ÷ (FP/100).")
+custom_metric(mm4, "Gasto mensual prom.",
+              f"$ {avg_month_kwh * costo_kwh:,.2f}" if costo_kwh > 0 else "—",
+              help="Consumo mensual promedio × costo medio.")
+
+fig_month = go.Figure()
+fig_month.add_trace(go.Bar(
+    x=[_MONTH_ABBR[ts.month - 1] for ts in dem_monthly.index], y=dem_monthly.values,
+    name="Consumo bruto", marker_color="#C62828"))
+if df_irr is not None:
+    fig_month.add_trace(go.Bar(
+        x=[_MONTH_ABBR[ts.month - 1] for ts in net_monthly.index], y=net_monthly.values,
+        name="Consumo neto (con FV)", marker_color="#0039A6"))
+fig_month.update_layout(template="plotly_white", barmode="group",
+                        yaxis_title="kWh / mes", height=320,
+                        legend=dict(orientation="h", y=-0.18), margin=dict(t=10, b=40))
+chart_with_export(fig_month, key="dem_monthly", filename="consumo_mensual")
+if costo_kwh > 0:
+    st.caption(f"Gasto anual estimado — sin FV: **$ {float(dem_monthly.sum()) * costo_kwh:,.2f}** · "
+               f"con FV: **$ {float(net_monthly.sum()) * costo_kwh:,.2f}** "
+               "(energía × costo medio; no incluye cargos de demanda ni FP).")
+
 # ── Dual plot ─────────────────────────────────────────────────────────────────
 st.divider()
 st.markdown("### Curva de carga vs. inyección solar")
