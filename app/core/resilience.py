@@ -125,6 +125,48 @@ def continuity_cashflows(
     }
 
 
+def investment_irr(
+    capex_mxn: float,
+    annual_benefit_mxn: float,
+    project_life_years: int = 10,
+    inflation_pct: float = 5.0,
+) -> float:
+    """
+    Internal rate of return (as a fraction, e.g. 0.18 = 18 %/yr) for an upfront
+    CAPEX repaid by a yearly benefit that grows at *inflation_pct*. The IRR is
+    the discount rate that zeroes the NPV; it is found by bisection on the
+    0–100 %/yr bracket, consistent with the growth pattern used in
+    ``continuity_cashflows``.
+
+    Returns ``nan`` if the project never breaks even (NPV < 0 even at a 0 %
+    discount), and ``inf`` if the IRR lies above the 100 % bracket.
+    """
+    if capex_mxn <= 0 or annual_benefit_mxn <= 0:
+        return float("nan")
+    inflation = inflation_pct / 100.0
+    years = range(1, int(project_life_years) + 1)
+
+    def _npv_at(rate: float) -> float:
+        return -capex_mxn + sum(
+            annual_benefit_mxn * ((1 + inflation) ** (y - 1)) / ((1 + rate) ** y)
+            for y in years
+        )
+
+    if _npv_at(0.0) < 0:
+        return float("nan")          # never profitable, even undiscounted
+    if _npv_at(1.0) > 0:
+        return float("inf")          # IRR exceeds the 100 %/yr bracket
+
+    lo, hi = 0.0, 1.0
+    for _ in range(100):
+        mid = (lo + hi) / 2.0
+        if _npv_at(mid) > 0:
+            lo = mid                 # NPV decreases with rate → root is higher
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
 def propose_bess(p_crit_kw: float, hours: float, usd_mxn: float = 17.5,
                  catalog: list[dict] | None = None) -> dict:
     """

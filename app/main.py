@@ -25,7 +25,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from core.jensen import run_jensen_model, compute_pv_generation, energy_kwh, peak_sun_hours
 from core.gdmto import GDMTOCalculator, MONTH_ABBR_ES
-from core.resilience import propose_bess, kva_to_kw, continuity_cashflows
+from core.resilience import propose_bess, kva_to_kw, continuity_cashflows, investment_irr
 from core.plots import (irradiance_plot, monthly_demand_vs_solar_bar,
                         gdmto_savings_waterfall, typical_day_profile_plot,
                         monthly_savings_bar, continuity_cashflow_bar)
@@ -481,22 +481,22 @@ if s2_on:
 
     ahorro_fv_anual = 0.0
     if eval_mode == "Módulo Express":
-        use_costo = st.checkbox("¿Deseas ingresar el costo promedio por kWh de tu recibo?",
-                                value=True, key="s2_express_on")
-        if use_costo:
-            costo_kwh = st.number_input("Costo promedio ($/kWh)", min_value=0.0,
-                                        value=float(st.session_state.get("costo_promedio_kwh", 2.67)),
-                                        step=0.01, format="%.2f", key="s2_costo_kwh")
-            st.session_state["costo_promedio_kwh"] = float(costo_kwh)
-            pago_actual = sum(k * costo_kwh for k in demand_monthly)
-            pago_con_fv = sum(max(k - g, 0.0) * costo_kwh
-                              for k, g in zip(demand_monthly, gen_monthly))
-            ahorro_fv_anual = pago_actual - pago_con_fv
-            ex1, ex2 = st.columns(2)
-            custom_metric(ex1, "Pago anual actual", f"$ {pago_actual:,.2f}")
-            custom_metric(ex2, "Pago anual con FV", f"$ {pago_con_fv:,.2f}",
-                       delta=f"-$ {ahorro_fv_anual:,.2f}", delta_color="inverse")
-            st.caption("Estimación rápida: Σ kWh × costo medio — no requiere el motor tarifario.")
+        # Single source of truth: reuse the "Costo medio del recibo" captured
+        # above (per-month if you used the table) instead of asking for it again.
+        costo_monthly = [float(c) for c in cfe_history["costo_medio_mxn_kwh"].tolist()]
+        costo_medio = float(np.mean(costo_monthly)) if costo_monthly else 0.0
+        st.session_state["costo_promedio_kwh"] = costo_medio
+        st.caption(f"Usando el **costo medio del recibo** capturado arriba "
+                   f"(${costo_medio:.2f}/kWh prom.) — edítalo en *Tu consumo CFE*.")
+        pago_actual = sum(k * c for k, c in zip(demand_monthly, costo_monthly))
+        pago_con_fv = sum(max(k - g, 0.0) * c
+                          for k, c, g in zip(demand_monthly, costo_monthly, gen_monthly))
+        ahorro_fv_anual = pago_actual - pago_con_fv
+        ex1, ex2 = st.columns(2)
+        custom_metric(ex1, "Pago anual actual", f"$ {pago_actual:,.2f}")
+        custom_metric(ex2, "Pago anual con FV", f"$ {pago_con_fv:,.2f}",
+                   delta=f"-$ {ahorro_fv_anual:,.2f}", delta_color="inverse")
+        st.caption("Estimación rápida: Σ kWh × costo medio — no requiere el motor tarifario.")
     else:
         dr_pct = st.slider("Reducción de demanda facturable por FV (%)", 0, 30, 0,
                            key="s2_dr_pct",
@@ -544,6 +544,46 @@ if s2_on:
                     "Ahorro": f"$ {b['savings_mxn']:,.2f}",
                 })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    # ── E) Rentabilidad de la inversión en paneles: TIR, VPN y recuperación ───
+    st.markdown("##### 📊 Rentabilidad de la inversión en paneles")
+    if s2_fv_capex_mxn > 0 and ahorro_fv_anual > 0:
+        rp1, rp2, rp3 = st.columns(3)
+        fv_life = int(rp1.number_input("Vida del proyecto (años)", min_value=5, max_value=30,
+                                       value=25, step=1, key="s2_fv_life"))
+        fv_infl = rp2.number_input("Inflación tarifaria (%/año)", min_value=0.0, max_value=15.0,
+                                   value=5.0, step=0.5, key="s2_fv_infl")
+        fv_disc = rp3.number_input("Tasa de descuento (%)", min_value=1.0, max_value=25.0,
+                                   value=10.0, step=0.5, key="s2_fv_disc")
+
+        cf_fv = continuity_cashflows(s2_fv_capex_mxn, ahorro_fv_anual,
+                                     fv_life, fv_infl, fv_disc)
+        tir = investment_irr(s2_fv_capex_mxn, ahorro_fv_anual, fv_life, fv_infl)
+        if tir != tir:                       # nan
+            tir_str = "—"
+        elif tir == float("inf"):
+            tir_str = "> 100 %"
+        else:
+            tir_str = f"{tir * 100:.1f} %"
+        pb = cf_fv["payback_years"]
+
+        rr1, rr2, rr3 = st.columns(3)
+        custom_metric(rr1, "TIR (Tasa Interna de Retorno)", tir_str,
+                   help="Cuánto crece cada peso invertido en los paneles por año; "
+                        "rentable cuando supera tu tasa de descuento.")
+        custom_metric(rr2, "VPN (Valor Presente Neto)", f"$ {cf_fv['npv_mxn']:,.2f}",
+                   delta="Rentable" if cf_fv["npv_mxn"] > 0 else "No rentable",
+                   delta_color="normal" if cf_fv["npv_mxn"] > 0 else "inverse",
+                   help="Valor de hoy de los ahorros futuros menos la inversión inicial.")
+        custom_metric(rr3, "Periodo de recuperación",
+                   f"{pb:.1f} años" if pb < 100 else "∞",
+                   help="CAPEX de paneles ÷ ahorro anual (recuperación simple).")
+        st.caption(f"Sobre una inversión FV de **$ {s2_fv_capex_mxn:,.2f} MXN** y un ahorro anual "
+                   f"de **$ {ahorro_fv_anual:,.2f}** creciente con la inflación tarifaria "
+                   "(beneficio·(1+inflación)^(año−1)/(1+descuento)^año).")
+    else:
+        st.info("Ingresa un número de paneles **> 0** y un ahorro FV positivo (evaluación de "
+                "arriba) para ver la TIR, el VPN y el periodo de recuperación.")
 
     st.session_state["ahorro_fv_anual"] = float(ahorro_fv_anual)
     st.session_state["s2_gen_monthly"] = gen_monthly
