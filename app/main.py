@@ -16,6 +16,7 @@ Baterías).
 
 import sys
 import json
+import base64
 from pathlib import Path
 
 import streamlit as st
@@ -136,6 +137,25 @@ st.markdown("""
     h2, h3 { color: #F57C00 !important; }
 </style>
 """, unsafe_allow_html=True)
+
+_BANNER_PATH = Path(__file__).parent / "pages" / "banner.jpg"
+
+
+@st.cache_data(show_spinner=False)
+def _banner_b64() -> str:
+    if not _BANNER_PATH.exists():
+        return ""
+    return base64.b64encode(_BANNER_PATH.read_bytes()).decode()
+
+
+_banner = _banner_b64()
+if _banner:
+    st.markdown(
+        f"<img src='data:image/jpeg;base64,{_banner}' "
+        "style='width:100%;height:220px;object-fit:cover;border-radius:12px;"
+        "margin-bottom:10px;box-shadow:0 4px 6px rgba(0,0,0,0.1)'/>",
+        unsafe_allow_html=True,
+    )
 
 st.markdown(
     "<h1 style='margin-bottom:0'>☀️ Streger Solar — Análisis CFE</h1>"
