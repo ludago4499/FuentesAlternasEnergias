@@ -260,26 +260,40 @@ if annual_gen_kwh <= 0 or panel is None or n_panels <= 0:
 else:
     st.caption("¿Conviene invertir en enfriar los paneles para recuperar la energía perdida "
                "por temperatura, o es más barato instalar módulos adicionales que generen "
-               "esa misma energía? ⚠️ La pérdida térmica es una **estimación gruesa** "
-               "(el modelo térmico detallado está pendiente).")
-    tc1, tc2, tc3, tc4 = st.columns(4)
-    temp_loss_pct = tc1.number_input("Pérdida térmica anual (%)", min_value=0.0,
-                                     max_value=20.0, value=5.0, step=0.5, format="%.1f",
-                                     key="eco_temp_loss",
-                                     help="Energía anual perdida por operar las celdas por "
-                                          "encima de 25 °C (derating NOCT). Estimación típica "
-                                          "en clima mexicano: 4–8 %.")
-    recovery_pct = tc2.number_input("Recuperación con enfriamiento (%)", min_value=0.0,
-                                    max_value=100.0, value=60.0, step=5.0, format="%.0f",
-                                    key="eco_cool_recovery",
-                                    help="Fracción de la pérdida térmica que el sistema de "
-                                         "enfriamiento activo logra recuperar.")
-    cooling_capex = tc3.number_input("CAPEX enfriamiento (MXN)", min_value=0.0,
+               "esa misma energía?")
+
+    # Thermal loss: inherited from the with/without-NOCT-derate year runs in
+    # main.py (exact under the model). Manual fallback if the keys are absent
+    # (e.g. older session).
+    gamma = abs(float(panel.get("temp_coeff_pmax", -0.30)))
+    temp_loss_kwh = float(st.session_state.get("s2_temp_loss_kwh", 0.0) or 0.0)
+    temp_loss_pct = float(st.session_state.get("s2_temp_loss_pct", 0.0) or 0.0)
+    if temp_loss_kwh > 0:
+        st.caption(f"🌡️ Pérdida térmica **heredada del modelo NOCT** (Sección 2): "
+                   f"**{temp_loss_kwh:,.0f} kWh/año** ({temp_loss_pct:.1f} % de la generación "
+                   f"ideal a 25 °C de celda).")
+    else:
+        temp_loss_pct = st.number_input(
+            "Pérdida térmica anual (%) — estimación manual", min_value=0.0, max_value=20.0,
+            value=5.0, step=0.5, format="%.1f", key="eco_temp_loss",
+            help="No se encontró la pérdida térmica del modelo (recalcula la Sección 2 en "
+                 "la página principal). Estimación típica en clima mexicano: 4–8 %.")
+        # gen = ideal·(1−p/100) → loss = gen·(p/100)/(1−p/100)
+        temp_loss_kwh = annual_gen_kwh * (temp_loss_pct / 100.0) / max(1.0 - temp_loss_pct / 100.0, 1e-9)
+
+    tc1, tc2, tc3 = st.columns(3)
+    cooling_dt = tc1.slider("ΔT de enfriamiento (°C)", min_value=0.0, max_value=25.0,
+                            value=15.0, step=0.5, key="eco_cool_dt",
+                            help=f"Reducción de temperatura de celda lograda por el sistema "
+                                 f"(aspersión de agua ≈ 10–20 °C). Cada °C recupera "
+                                 f"|γ| = {gamma:.2f} %/°C de potencia, acotado a la pérdida "
+                                 f"térmica real del modelo.")
+    cooling_capex = tc2.number_input("CAPEX enfriamiento (MXN)", min_value=0.0,
                                      value=float(n_panels * 800.0), step=1000.0, format="%.0f",
                                      key="eco_cool_capex",
                                      help="Aspersores/ventilación + bombas + control. "
                                           "Por defecto ≈ $800 MXN por panel.")
-    cooling_opex = tc4.number_input("OPEX enfriamiento (MXN/año)", min_value=0.0,
+    cooling_opex = tc3.number_input("OPEX enfriamiento (MXN/año)", min_value=0.0,
                                     value=float(cooling_capex * 0.05), step=500.0, format="%.0f",
                                     key="eco_cool_opex",
                                     help="Agua, bombeo y mantenimiento anual del sistema "
@@ -289,14 +303,20 @@ else:
     panel_kwh_yr = annual_gen_kwh / n_panels
 
     trade = cooling_vs_extra_panels(
-        annual_gen_kwh, temp_loss_pct, recovery_pct, cooling_capex, cooling_opex,
+        annual_gen_kwh, temp_loss_kwh, cooling_dt, -gamma, cooling_capex, cooling_opex,
         panel_kwh_yr, panel_capex_mxn, costo_kwh,
         int(project_life), inflation_pct, discount_pct, degradation_pct,
     )
 
     ta1, ta2, ta3 = st.columns(3)
-    custom_metric(ta1, "Energía recuperable", f"{trade['recovered_kwh_yr']:,.0f} kWh/año",
-                  help="Pérdida térmica × recuperación del enfriamiento.")
+    custom_metric(ta1, "Energía recuperada", f"{trade['recovered_kwh_yr']:,.0f} kWh/año",
+                  delta="⚠️ Acotada por la pérdida térmica"
+                  if trade["capped_by_thermal_loss"] else None,
+                  delta_color="off",
+                  help=f"E = generación × |γ| × ΔT = {annual_gen_kwh:,.0f} × {gamma:.2f}%/°C × "
+                       f"{cooling_dt:.1f} °C, acotada a la pérdida térmica del modelo "
+                       f"({temp_loss_kwh:,.0f} kWh/año): el enfriamiento no puede recuperar "
+                       f"más de lo que la temperatura pierde.")
     custom_metric(ta2, "Módulos equivalentes", f"{trade['extra_panels']}",
                   help=f"Paneles {panel['brand']} {panel['model']} extra que generan la "
                        f"misma energía ({panel_kwh_yr:,.0f} kWh/año c/u, "

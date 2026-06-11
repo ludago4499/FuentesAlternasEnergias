@@ -110,23 +110,75 @@ def test_lcoe_nan_without_generation():
 # ── Trade-offs ────────────────────────────────────────────────────────────────
 
 def test_cooling_tradeoff_panels_win_when_cooling_expensive():
+    # gen·|γ|·ΔT = 50,000 × 0.30 %/°C × 10 °C = 1,500 kWh (below the loss cap)
     t = cooling_vs_extra_panels(
-        annual_gen_kwh=50_000.0, temp_loss_pct=5.0, cooling_recovery_pct=60.0,
+        annual_gen_kwh=50_000.0, thermal_loss_kwh=2_000.0,
+        cooling_delta_t_c=10.0, temp_coeff_pmax=-0.30,
         cooling_capex_mxn=1_000_000.0, cooling_opex_mxn_yr=50_000.0,
         panel_kwh_yr=900.0, panel_capex_mxn=5_000.0, energy_value_mxn_kwh=2.67,
     )
     assert t["winner"] == "panels"
     assert t["recovered_kwh_yr"] == pytest.approx(1_500.0)
+    assert not t["capped_by_thermal_loss"]
     assert t["extra_panels"] == 2  # ceil(1500/900)
 
 
 def test_cooling_tradeoff_cooling_wins_when_cheap():
     t = cooling_vs_extra_panels(
-        annual_gen_kwh=50_000.0, temp_loss_pct=8.0, cooling_recovery_pct=80.0,
+        annual_gen_kwh=50_000.0, thermal_loss_kwh=4_000.0,
+        cooling_delta_t_c=20.0, temp_coeff_pmax=-0.30,
         cooling_capex_mxn=2_000.0, cooling_opex_mxn_yr=0.0,
         panel_kwh_yr=900.0, panel_capex_mxn=20_000.0, energy_value_mxn_kwh=2.67,
     )
     assert t["winner"] == "cooling"
+
+
+def test_cooling_recovery_capped_by_thermal_loss():
+    """Physics congruence: cooling can never recover more energy than the
+    NOCT derating actually lost."""
+    t = cooling_vs_extra_panels(
+        annual_gen_kwh=50_000.0, thermal_loss_kwh=2_000.0,
+        cooling_delta_t_c=25.0, temp_coeff_pmax=-0.30,   # uncapped → 3,750 kWh
+        cooling_capex_mxn=10_000.0, cooling_opex_mxn_yr=0.0,
+        panel_kwh_yr=900.0, panel_capex_mxn=5_000.0, energy_value_mxn_kwh=2.67,
+    )
+    assert t["recovered_kwh_uncapped"] == pytest.approx(3_750.0)
+    assert t["recovered_kwh_yr"] == pytest.approx(2_000.0)
+    assert t["capped_by_thermal_loss"]
+
+
+def test_cooling_zero_delta_t_recovers_nothing():
+    t = cooling_vs_extra_panels(
+        annual_gen_kwh=50_000.0, thermal_loss_kwh=2_000.0,
+        cooling_delta_t_c=0.0, temp_coeff_pmax=-0.30,
+        cooling_capex_mxn=10_000.0, cooling_opex_mxn_yr=1_000.0,
+        panel_kwh_yr=900.0, panel_capex_mxn=5_000.0, energy_value_mxn_kwh=2.67,
+    )
+    assert t["recovered_kwh_yr"] == 0.0
+    assert t["winner"] == "panels"
+
+
+def test_thermal_loss_delta_from_pv_generation_runs():
+    """Corroborate the option-A approach: running compute_pv_generation with
+    and without the temperature coefficient yields a positive thermal loss in
+    a plausible band (~2–12 % for a sunny synthetic day at 25 °C ambient)."""
+    import numpy as np
+    import pandas as pd
+    from core.jensen import compute_pv_generation
+
+    idx = pd.date_range("2024-03-21", periods=24, freq="h", tz="America/Mexico_City")
+    poa = np.clip(900.0 * np.sin(np.pi * (np.arange(24) - 6) / 12.0), 0.0, None)
+    df = pd.DataFrame({"poa_global": poa}, index=idx)
+    df.attrs["dt_h"] = 1.0
+
+    kwargs = dict(system_kwp=5.8, panel_efficiency=22.3, panel_wp=580.0,
+                  panel_area_m2=2.583, n_panels=10, noct=43.0)
+    gen = compute_pv_generation(df, temp_coeff_pmax=-0.30, **kwargs).sum()
+    gen_ideal = compute_pv_generation(df, temp_coeff_pmax=0.0, **kwargs).sum()
+
+    loss_pct = (gen_ideal - gen) / gen_ideal * 100.0
+    assert gen_ideal > gen > 0
+    assert 2.0 < loss_pct < 12.0
 
 
 def test_investment_metrics_bundle():

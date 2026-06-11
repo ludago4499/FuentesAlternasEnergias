@@ -342,7 +342,8 @@ _SOLAR_YEAR = ("2024-01-01", "2024-12-31")
 def _year_pv_monthly(lat: float, lon: float, tilt: float, az_pvlib: float, tz: str,
                      altitude: float, panel_id: str, n_panels: int):
     """Hourly year with AR(1) cloud variability (fixed seed → reproducible)
-    → (monthly kWh ×12, mean-day kW profile 12×24, annual kWh)."""
+    → (monthly kWh ×12, mean-day kW profile 12×24, annual kWh,
+       annual kWh ideal sin derating térmico)."""
     panel = next(p for p in PANELS if p["id"] == panel_id)
     df = run_jensen_model(
         lat=lat, lon=lon, tilt=tilt, azimuth=az_pvlib,
@@ -350,21 +351,26 @@ def _year_pv_monthly(lat: float, lon: float, tilt: float, az_pvlib: float, tz: s
         tz=tz, altitude=altitude, freq="h",
         weather_source="stochastic", stochastic_seed=42,
     )
-    pv_kw = compute_pv_generation(
-        df,
+    _pv_kwargs = dict(
         system_kwp=n_panels * panel["wp"] / 1000.0,
         panel_efficiency=panel["efficiency_pct"],
         panel_wp=panel["wp"],
         panel_area_m2=panel.get("area_m2"),
         n_panels=n_panels,
-        temp_coeff_pmax=panel.get("temp_coeff_pmax", -0.30),
         noct=panel.get("noct", 43),
     )
+    pv_kw = compute_pv_generation(
+        df, temp_coeff_pmax=panel.get("temp_coeff_pmax", -0.30), **_pv_kwargs,
+    )
+    # Same run with temp_coeff_pmax=0 → ideal generation at 25 °C cell temp.
+    # The delta is the energy lost to NOCT thermal derating, surfaced to the
+    # economics page for the cooling-vs-extra-panels trade-off.
+    pv_kw_ideal = compute_pv_generation(df, temp_coeff_pmax=0.0, **_pv_kwargs)
     monthly = pv_kw.groupby(pv_kw.index.month).sum()              # dt = 1 h → kWh
     monthly_kwh = [float(monthly.get(m, 0.0)) for m in range(1, 13)]
     prof = pv_kw.groupby([pv_kw.index.month, pv_kw.index.hour]).mean().unstack(fill_value=0.0)
     prof = prof.reindex(index=range(1, 13), columns=range(24), fill_value=0.0)
-    return monthly_kwh, prof.values, float(pv_kw.sum())
+    return monthly_kwh, prof.values, float(pv_kw.sum()), float(pv_kw_ideal.sum())
 
 
 if s2_on:
@@ -442,13 +448,22 @@ if s2_on:
     })
 
     if s2_n_panels > 0:
-        gen_monthly, gen_profile, gen_annual = _year_pv_monthly(
+        gen_monthly, gen_profile, gen_annual, gen_annual_ideal = _year_pv_monthly(
             float(lat), float(lon), float(tilt), azimuth_pvlib, tz, float(_alt_d),
             s2_panel["id"], int(s2_n_panels),
         )
     else:
-        gen_monthly, gen_profile, gen_annual = [0.0] * 12, np.zeros((12, 24)), 0.0
+        gen_monthly, gen_profile = [0.0] * 12, np.zeros((12, 24))
+        gen_annual = gen_annual_ideal = 0.0
         st.info("💡 Ingresa un número de paneles mayor a 0 para ver la generación solar.")
+
+    # Thermal (NOCT) loss vs ideal 25 °C cell operation — inherited by the
+    # economics page (cooling-vs-extra-panels trade-off).
+    _temp_loss_kwh = max(gen_annual_ideal - gen_annual, 0.0)
+    st.session_state["s2_temp_loss_kwh"] = _temp_loss_kwh
+    st.session_state["s2_temp_loss_pct"] = (
+        _temp_loss_kwh / gen_annual_ideal * 100.0 if gen_annual_ideal > 0 else 0.0
+    )
 
     # ── C) Balance mensual demanda vs generación ──────────────────────────────
     demand_monthly = [float(v) for v in cfe_history["kwh"].tolist()]

@@ -167,8 +167,9 @@ def lcoe_mxn_kwh(
 
 def cooling_vs_extra_panels(
     annual_gen_kwh: float,
-    temp_loss_pct: float,
-    cooling_recovery_pct: float,
+    thermal_loss_kwh: float,
+    cooling_delta_t_c: float,
+    temp_coeff_pmax: float,
     cooling_capex_mxn: float,
     cooling_opex_mxn_yr: float,
     panel_kwh_yr: float,
@@ -183,15 +184,23 @@ def cooling_vs_extra_panels(
     Engineering trade-off: recover thermally-lost energy with an active
     cooling system, or simply buy extra modules that produce the same kWh?
 
+    The cooling side speaks engineering language: a ΔT (°C) cell-temperature
+    reduction achieved by the system (water spray ≈ 10–20 °C). Recovered
+    energy uses the panel's own power-temperature coefficient γ:
+
+        E_rec = min( E_gen · |γ|/100 · ΔT ,  E_thermal_loss )
+
+    The cap keeps the model congruent with physics: cooling can never recover
+    more than what the NOCT derating actually lost (``thermal_loss_kwh``,
+    surfaced by main.py from the with/without-derate year runs).
+
     Both options are valued with the same degradation-aware NPV so the
     comparison is apples-to-apples:
       - Cooling: −capex + PV(recovered kWh · tariff − opex)
       - Panels : −n·panel_capex + PV(n · panel_kwh · tariff)
-
-    NOTE: temp_loss_pct is a coarse estimate (the app does not yet model cell
-    temperature in detail); treat the verdict as a screening result.
     """
-    recovered_kwh = annual_gen_kwh * (temp_loss_pct / 100.0) * (cooling_recovery_pct / 100.0)
+    recovered_uncapped = annual_gen_kwh * (abs(temp_coeff_pmax) / 100.0) * cooling_delta_t_c
+    recovered_kwh = min(recovered_uncapped, max(thermal_loss_kwh, 0.0))
 
     n_panels = math.ceil(recovered_kwh / panel_kwh_yr) if panel_kwh_yr > 0 else 0
     panels_kwh = n_panels * panel_kwh_yr
@@ -216,6 +225,9 @@ def cooling_vs_extra_panels(
 
     return {
         "recovered_kwh_yr": recovered_kwh,
+        "recovered_kwh_uncapped": recovered_uncapped,
+        "capped_by_thermal_loss": recovered_uncapped > recovered_kwh,
+        "cooling_delta_t_c": cooling_delta_t_c,
         "cooling_capex_mxn": cooling_capex_mxn,
         "cooling_npv_mxn": cf_cooling["npv_mxn"],
         "cooling_capex_per_kwh_yr": cost_kwh_cooling,
