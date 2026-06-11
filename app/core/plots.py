@@ -579,6 +579,102 @@ def battery_optimization_plot(rows: list[dict], best_units: int) -> go.Figure:
     return fig
 
 
+def charge_cycle_plot(sim: dict, capacity_kwh: float) -> go.Figure:
+    """
+    Battery charge-cycle behavior: state of charge (SoC %) on the primary axis,
+    plus the hourly energy charged (from solar and grid) and discharged on the
+    secondary axis. Expects the ``sim`` dict returned by
+    ``core.battery.simulate_dispatch`` (Series ``soc``, ``charge_solar_kw``,
+    ``charge_grid_kw``, ``discharge_kw``).
+    """
+    soc = sim["soc"]
+    chg_solar = sim["charge_solar_kw"]
+    chg_grid = sim["charge_grid_kw"]
+    dis = sim["discharge_kw"]
+
+    soc_pct = (soc.values / capacity_kwh * 100.0) if capacity_kwh > 0 else soc.values * 0.0
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_trace(go.Bar(
+        x=chg_solar.index, y=chg_solar.values, name="Carga desde solar (kWh)",
+        marker_color=SOLAR_YELLOW,
+        hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Carga solar: %{y:.1f} kWh<extra></extra>",
+    ), secondary_y=True)
+    fig.add_trace(go.Bar(
+        x=chg_grid.index, y=chg_grid.values, name="Carga desde red (kWh)",
+        marker_color=LIGHT_BLUE,
+        hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Carga red: %{y:.1f} kWh<extra></extra>",
+    ), secondary_y=True)
+    fig.add_trace(go.Bar(
+        x=dis.index, y=[-v for v in dis.values], name="Descarga (kWh)",
+        marker_color=SOLAR_ORANGE,
+        hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>Descarga: %{y:.1f} kWh<extra></extra>",
+    ), secondary_y=True)
+    fig.add_trace(go.Scatter(
+        x=soc.index, y=soc_pct, name="Estado de carga (SoC)",
+        line=dict(color=GREEN, width=2),
+        hovertemplate="<b>%{x|%Y-%m-%d %H:%M}</b><br>SoC: %{y:.0f} %<extra></extra>",
+    ), secondary_y=False)
+
+    fig.update_layout(
+        template="plotly_white",
+        barmode="relative",
+        height=420,
+        xaxis_title="Tiempo",
+        legend=dict(orientation="h", y=-0.18),
+        hovermode="x unified",
+        margin=dict(t=20, b=70),
+    )
+    fig.update_yaxes(title_text="SoC (%)", secondary_y=False, range=[0, 105])
+    fig.update_yaxes(title_text="Energía por hora (kWh)", secondary_y=True, showgrid=False)
+    return fig
+
+
+def load_duration_curve_plot(
+    demand_kw: pd.Series,
+    net_solar_kw: pd.Series,
+    net_batt_kw: pd.Series | None = None,
+) -> go.Figure:
+    """
+    Load-duration curve: demand sorted high→low for the original demand, the net
+    demand with solar, and (optionally) the net demand after the battery. Makes
+    the peak reduction and the flattening of the load profile explicit.
+    """
+    fig = go.Figure()
+
+    sorted_orig = np.sort(np.asarray(demand_kw.values, dtype=float))[::-1]
+    hours_axis = np.arange(1, len(sorted_orig) + 1)
+    fig.add_trace(go.Scatter(
+        x=hours_axis, y=sorted_orig, name="Original",
+        line=dict(color=RED, width=2),
+    ))
+
+    sorted_solar = np.sort(np.asarray(net_solar_kw.values, dtype=float))[::-1]
+    fig.add_trace(go.Scatter(
+        x=np.arange(1, len(sorted_solar) + 1), y=sorted_solar, name="Con FV",
+        line=dict(color=SOLAR_ORANGE, width=2, dash="dot"),
+    ))
+
+    if net_batt_kw is not None:
+        sorted_batt = np.sort(np.asarray(net_batt_kw.values, dtype=float))[::-1]
+        fig.add_trace(go.Scatter(
+            x=np.arange(1, len(sorted_batt) + 1), y=sorted_batt, name="Con FV + Batería",
+            line=dict(color=TEC_BLUE, width=2.4),
+            fill="tonexty", fillcolor="rgba(0,57,166,0.10)",
+        ))
+
+    fig.update_layout(
+        template="plotly_white",
+        height=360,
+        xaxis_title="Períodos (ordenados de mayor a menor carga)",
+        yaxis_title="Demanda (kW)",
+        legend=dict(orientation="h", y=-0.18),
+        hovermode="x unified",
+        margin=dict(t=20, b=60),
+    )
+    return fig
+
+
 def poa_heatmap(df: pd.DataFrame) -> go.Figure:
     """Heatmap of daily hourly POA irradiance."""
     df2 = df.copy()

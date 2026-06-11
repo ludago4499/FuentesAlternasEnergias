@@ -140,7 +140,8 @@ def test_gdmth_mode_stops_main_flow():
 
 
 def test_baterias_warns_and_stops_under_gdmto():
-    at = AppTest.from_file(str(APP_DIR / "pages" / "6_baterias.py"), default_timeout=60)
+    # Baterías now sits above Economía in the sidebar (pages/5_baterias.py).
+    at = AppTest.from_file(str(APP_DIR / "pages" / "5_baterias.py"), default_timeout=60)
     at.run()
     assert not at.exception
     assert len(at.info) >= 1          # the GDMTO redirect notice
@@ -148,26 +149,38 @@ def test_baterias_warns_and_stops_under_gdmto():
 
 def test_baterias_gdmth_path_reaches_demand_warning():
     # Baterías still requires an explicit demand curve and warns if missing.
-    at = AppTest.from_file(str(APP_DIR / "pages" / "6_baterias.py"), default_timeout=60)
+    at = AppTest.from_file(str(APP_DIR / "pages" / "5_baterias.py"), default_timeout=60)
     at.session_state["tariff_mode"] = "GDMTH"
     at.run()
     assert not at.exception
     assert len(at.warning) >= 1       # "carga la demanda" guard
 
 
-def test_continuity_page_requires_battery_quote():
-    # The new Continuity page (5_economics.py) needs a battery quote from
-    # Sección 3 / página Baterías; with none it warns and stops cleanly.
-    at = AppTest.from_file(str(APP_DIR / "pages" / "5_economics.py"), default_timeout=60)
+def test_economics_page_works_without_battery():
+    # The Economics page (pages/6_economics.py) is viewable WITHOUT a battery:
+    # with no quote and no outage/FV it shows guidance and stops cleanly (info,
+    # not a hard battery requirement).
+    at = AppTest.from_file(str(APP_DIR / "pages" / "6_economics.py"), default_timeout=60)
     at.run()
     assert not at.exception
-    assert len(at.warning) >= 1       # "no hay cotización de baterías" guard
+    assert len(at.info) >= 1          # "evaluando sin batería" / "ingresa apagones" guidance
+
+
+def test_economics_page_no_battery_with_outage_computes_roi():
+    # Outage cost only, no battery: still computes ROI/VPN (battery optional).
+    at = AppTest.from_file(str(APP_DIR / "pages" / "6_economics.py"), default_timeout=60)
+    at.session_state["outage_cost_annual"] = 90_000.0
+    at.run()
+    assert not at.exception
+    labels = list(_custom_metrics(at))
+    assert any("ROI" in l for l in labels)
+    assert any("VPN" in l for l in labels)
 
 
 def test_continuity_page_computes_roi_with_quote_and_outage():
     # With a battery proposal and an outage cost it produces the ROI metrics
     # and the cashflow chart without errors.
-    at = AppTest.from_file(str(APP_DIR / "pages" / "5_economics.py"), default_timeout=60)
+    at = AppTest.from_file(str(APP_DIR / "pages" / "6_economics.py"), default_timeout=60)
     at.session_state["bess_proposal"] = {
         "capex_mxn": 500_000.0, "units": 4, "brand": "Test", "model": "BESS",
         "total_usable_kwh": 40.0,

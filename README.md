@@ -70,7 +70,8 @@ Streger/
 │   │   ├── 2_config.py          # Configuración panel / batería / ubicación
 │   │   ├── 3_solar.py           # Modelo Jensen, POA, generación FV
 │   │   ├── 4_demand.py          # Curva de carga + inyección solar
-│   │   └── 5_economics.py       # Tarifas GDMTH + ahorros + PDF
+│   │   ├── 5_baterias.py        # Despacho / peak shaving + ciclos de carga
+│   │   └── 6_economics.py       # Continuidad / ROI (batería opcional)
 │   ├── core/
 │   │   ├── jensen.py            # Wrapper pvlib modelo isótropo
 │   │   ├── gdmth.py             # Calculadora tarifa GDMTH

@@ -12,6 +12,8 @@ from core.plots import (
     battery_dispatch_plot,
     battery_cost_comparison_bar,
     battery_optimization_plot,
+    charge_cycle_plot,
+    load_duration_curve_plot,
 )
 from core.exporting import chart_with_export
 from core.state import keep_state
@@ -20,7 +22,7 @@ from utils.theming import inject_theme, custom_metric
 st.set_page_config(page_title="Baterías — GDMTH Solar", page_icon="🔋", layout="wide")
 keep_state()
 
-inject_theme("06")
+inject_theme("05")
 # ── CSS / Banner ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -74,6 +76,44 @@ BATTERIES = load_batteries()
 solar_aligned = solar_kw.reindex(demand_df.index, fill_value=0.0)
 net_solar_series = (demand_df["demand"] - solar_aligned).clip(lower=0)
 peak_net = float(net_solar_series.max())
+
+# ── Contexto heredado: paneles/sistema FV y generación que llega aquí ─────────
+# El sistema (panel + nº de paneles) se elige en Configuración, se simula en
+# Análisis Solar y se alinea contra la demanda en la página Demanda. Aquí se
+# muestra explícitamente para confirmar que TODO eso se está heredando.
+_panel = st.session_state.get("panel") or {}
+_panel_name = (f"{_panel.get('brand', '')} {_panel.get('model', '')}".strip()
+               or "— (configura en ⚙️ Configuración)")
+_n_panels = int(st.session_state.get("n_panels", 0) or 0)
+_system_kwp = float(st.session_state.get("system_kwp", 0.0) or 0.0)
+_solar_total_kwh = float(solar_aligned.sum())
+
+with st.container(border=True):
+    st.markdown("**🔗 Heredado del flujo previo (Configuración → Solar → Demanda):**")
+    h1, h2, h3, h4 = st.columns(4)
+    custom_metric(h1, "Paneles", f"{_n_panels} × {_panel.get('wp', '—')} Wp" if _n_panels else "—",
+                  help=_panel_name)
+    custom_metric(h2, "Sistema FV", f"{_system_kwp:,.2f} kWp")
+    custom_metric(h3, "Generación FV disponible", f"{_solar_total_kwh:,.0f} kWh",
+                  help="Generación solar alineada contra la curva de demanda (página Demanda).")
+    custom_metric(h4, "Fuente de demanda", st.session_state.get("demand_source", "—"))
+
+    # Diagnóstico: el modelo solar corrió pero no llega generación → casi siempre
+    # es que el rango de fechas del modelo solar no traslapa con la curva de demanda.
+    _irr = st.session_state.get("irradiance_df")
+    if _irr is not None and _solar_total_kwh < 1.0:
+        _ss, _se = st.session_state.get("solar_start"), st.session_state.get("solar_end")
+        st.warning(
+            "⚠️ Hay un modelo solar ejecutado pero **no llega generación a las baterías** "
+            f"(0 kWh). Casi siempre es porque el rango de fechas del **Análisis Solar** "
+            f"({_ss} → {_se}) no coincide con el de la **curva de demanda** "
+            f"({demand_df.index.min().date()} → {demand_df.index.max().date()}). "
+            "Regenera la demanda con el mismo rango (la página Demanda lo alinea con "
+            "`solar_start`/`solar_end`) o vuelve a correr el solar en ese rango."
+        )
+    elif _irr is None:
+        st.info("ℹ️ Aún no se ha ejecutado el **Análisis Solar**: la batería se evalúa sin "
+                "generación FV. Corre el modelo solar para heredar la generación de tus paneles.")
 
 # ── Battery selection ─────────────────────────────────────────────────────────
 st.markdown("<h3 class='section-title'>1️⃣ Selecciona la batería</h3>", unsafe_allow_html=True)
@@ -155,17 +195,52 @@ custom_metric(cspec3, "CAPEX baterías", f"${bat_capex_usd:,.0f} USD")
 custom_metric(cspec4, "Modo de carga", "Solar (sin red)" if solar_only else "Solar + Red")
 
 # ── Run dispatch (with battery) and the solar-only baseline ───────────────────
-# These are two hour-by-hour dispatch models. Running both un-cached on every
-# interaction (and on every tab change) is what froze the page. Caching keeps
-# the baseline model from ever recomputing and returns instantly when the user
-# navigates away and back or moves an unrelated control.
-@st.cache_data(show_spinner="Calculando despacho de baterías…")
-def _eval_dispatch(region: str, demand_df: pd.DataFrame, solar_kw: pd.Series, cfg: dict) -> dict:
-    return evaluate(GDMTHCalculator(region=region), demand_df, solar_kw, cfg)
+# These are two hour-by-hour dispatch models. The page used to freeze because it
+# re-ran both on every interaction: st.cache_data was re-hashing the full-year
+# demand/solar frames (re-committed by keep_state each run) twice per rerun, so
+# cache hits were unreliable and both heavy models recomputed.
+#
+# Fix: the heavy objects are passed as *underscore-prefixed* args, which
+# st.cache_data does NOT hash. The cache key is instead a cheap signature
+# (demand source + length + first/last timestamp + total energy) plus a
+# canonical, hashable tuple of the config. Hashing is now O(1)-ish and the
+# solar-only baseline (capacity 0 → config-independent) is computed once and
+# reused across every slider move.
+def _demand_signature(dem_df: pd.DataFrame, sol_kw: pd.Series) -> tuple:
+    idx = dem_df.index
+    return (
+        st.session_state.get("demand_source", ""),
+        len(idx),
+        str(idx[0]) if len(idx) else "",
+        str(idx[-1]) if len(idx) else "",
+        round(float(dem_df["demand"].sum()), 3),
+        round(float(sol_kw.sum()), 3),
+    )
 
+
+def _cfg_key(c: dict) -> tuple:
+    return (
+        round(float(c.get("capacity_kwh", 0.0)), 6),
+        round(float(c.get("power_kw", 0.0)), 6),
+        round(float(c.get("roundtrip_pct", 95.0)), 6),
+        bool(c.get("solar_only_charge", True)),
+        tuple(int(h) for h in (c.get("discharge_hours") or ())),
+        c.get("discharge_threshold_kw"),
+    )
+
+
+@st.cache_data(show_spinner="Calculando despacho de baterías…")
+def _eval_dispatch(sig: tuple, region: str, cfg_key: tuple,
+                   _demand_df: pd.DataFrame, _solar_kw: pd.Series, _cfg: dict) -> dict:
+    # Only `sig`, `region` and `cfg_key` participate in the cache key; the
+    # underscore-prefixed frames/config are used for compute but not hashed.
+    return evaluate(GDMTHCalculator(region=region), _demand_df, _solar_kw, _cfg)
+
+
+_sig = _demand_signature(demand_df, solar_kw)
 _base_cfg = {"capacity_kwh": 0.0, "power_kw": 0.0, "roundtrip_pct": cfg["roundtrip_pct"]}
-ev_batt = _eval_dispatch(region, demand_df, solar_kw, cfg)
-ev_base = _eval_dispatch(region, demand_df, solar_kw, _base_cfg)
+ev_batt = _eval_dispatch(_sig, region, _cfg_key(cfg), demand_df, solar_kw, cfg)
+ev_base = _eval_dispatch(_sig, region, _cfg_key(_base_cfg), demand_df, solar_kw, _base_cfg)
 
 annual_batt = ev_batt["annual"]
 annual_base = ev_base["annual"]
@@ -270,6 +345,37 @@ with st.container(border=True):
     chart_with_export(fig_disp, key="bat_dispatch", filename="despacho_bateria")
     st.caption("🔴 Demanda original · 🟠 Neta con FV · 🔵 Neta con FV+Batería (rellena) · 🟢 SoC · "
                "🟩 línea = umbral · banda = ventana horaria de descarga.")
+
+# ── Curve change: charge-cycle behavior (SoC + energía por hora) ──────────────
+st.write("")
+with st.container(border=True):
+    st.markdown("<h3 class='section-title'>🔄 Comportamiento de los ciclos de carga</h3>",
+                unsafe_allow_html=True)
+    chart_with_export(
+        charge_cycle_plot(
+            {k: v.loc[mask] for k, v in sim.items()},
+            cfg["capacity_kwh"],
+        ),
+        key="bat_charge_cycle", filename="ciclos_carga_bateria",
+    )
+    st.caption("🟢 Estado de carga (SoC, %) · 🟡 carga desde solar · 🔵 carga desde red · "
+               "🟠 descarga (kWh/hora). Muestra cómo se llena y vacía la batería cada día.")
+
+# ── Curve change: load-duration curve ─────────────────────────────────────────
+st.write("")
+with st.container(border=True):
+    st.markdown("<h3 class='section-title'>📐 Curva de duración de carga</h3>",
+                unsafe_allow_html=True)
+    chart_with_export(
+        load_duration_curve_plot(
+            demand_df.loc[mask, "demand"],
+            net_solar.loc[mask],
+            net_batt.loc[mask],
+        ),
+        key="bat_ldc", filename="curva_duracion_carga_bateria",
+    )
+    st.caption("Demanda ordenada de mayor a menor. Cuanto más se aplana y baja el pico de la curva "
+               "azul (FV + batería), mayor el recorte de demanda máxima.")
 
 # ── Curve change: monthly cost ('gasto de energía') ───────────────────────────
 st.write("")

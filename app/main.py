@@ -197,10 +197,18 @@ with st.sidebar:
     cs1, cs2 = st.columns(2)
     custom_metric(cs1, "Ciudad", st.session_state.get("city", "—").split(",")[0])
     custom_metric(cs2, "Modo", st.session_state.get("tariff_mode", "GDMTO"))
-    cs3, cs4 = st.columns(2)
-    _kwp = st.session_state.get("s2_system_kwp") or st.session_state.get("system_kwp", 0.0)
-    custom_metric(cs3, "Sistema (kWp)", f"{_kwp:.1f}")
-    custom_metric(cs4, "Respaldo (h)", st.session_state.get("backup_hours", 0))
+    if st.session_state["tariff_mode"] == "GDMTH":
+        # Bajo GDMTH el flujo es horario y vive en las páginas: el resumen apunta
+        # a esos datos (no se muestran controles/resúmenes residenciales/GDMTO).
+        cs3, cs4 = st.columns(2)
+        _kwp = st.session_state.get("system_kwp", 0.0)
+        custom_metric(cs3, "Sistema (kWp)", f"{_kwp:.1f}")
+        custom_metric(cs4, "Región CFE", st.session_state.get("region", "—"))
+    else:
+        cs3, cs4 = st.columns(2)
+        _kwp = st.session_state.get("s2_system_kwp") or st.session_state.get("system_kwp", 0.0)
+        custom_metric(cs3, "Sistema (kWp)", f"{_kwp:.1f}")
+        custom_metric(cs4, "Respaldo (h)", st.session_state.get("backup_hours", 0))
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECCIÓN 1 — VISTA RÁPIDA (desplegable / colapsable)
@@ -231,13 +239,16 @@ with st.expander("🔆 Sección 1 — Vista Rápida · ubicación, orientación 
 
     opt_tilt = int(round(abs(lat)))
     col_tilt, col_az = st.columns(2)
+    # key= keeps the user's override across page navigation (without a key the
+    # slider resets to the optimal default every time the page is revisited).
     tilt = col_tilt.slider(
         "Inclinación del panel (°)", min_value=0, max_value=60, value=opt_tilt,
+        key="s1_tilt",
         help=f"Por defecto la inclinación óptima anual ≈ latitud del sitio ({opt_tilt}°). Ajústala si tu techo lo requiere.",
     )
     azimuth = col_az.slider(
         "Azimut del panel (0° = Sur | −90° = Este | +90° = Oeste)",
-        min_value=-180, max_value=180, value=0, step=5,
+        min_value=-180, max_value=180, value=0, step=5, key="s1_azimuth",
         help="Convención del proyecto: 0° = Sur (óptimo en México).",
     )
     azimuth_pvlib = (180.0 + float(azimuth)) % 360.0
@@ -364,13 +375,13 @@ if s2_on:
     if input_mode == "Promedio mensual":
         ca1, ca2, ca3, ca4 = st.columns(4)
         kwh_avg = ca1.number_input("Consumo mensual (kWh)", min_value=0.0,
-                                   value=9520.0, step=100.0, format="%.0f")
+                                   value=9520.0, step=100.0, format="%.0f", key="s2_kwh_avg")
         kw_avg = ca2.number_input("Demanda máxima (kW)", min_value=0.0,
-                                  value=80.0, step=1.0, format="%.1f")
+                                  value=80.0, step=1.0, format="%.1f", key="s2_kw_avg")
         fp_avg = ca3.number_input("Factor de potencia (%)", min_value=50.0, max_value=100.0,
-                                  value=89.89, step=0.01, format="%.2f")
+                                  value=89.89, step=0.01, format="%.2f", key="s2_fp_avg")
         costo_avg = ca4.number_input("Costo medio del recibo ($/kWh)", min_value=0.0,
-                                     value=2.67, step=0.01, format="%.2f")
+                                     value=2.67, step=0.01, format="%.2f", key="s2_costo_avg")
         cfe_history = pd.DataFrame({
             "mes": MONTH_ABBR_ES,
             "kwh": [kwh_avg] * 12,
@@ -472,121 +483,12 @@ if s2_on:
                    f"{kwh_m:,.0f} kWh. La **demanda facturable** es la capturada en tu recibo "
                    f"({float(cfe_history['demanda_kw'].iloc[m_idx]):,.1f} kW), no el pico del perfil.")
 
-    # ── D) Evaluación económica: Express o desglose formal ────────────────────
-    st.markdown("#### 💰 Evaluación económica")
-    eval_mode = st.radio("Tipo de evaluación", ["Módulo Express", "Desglose formal GDMTO"],
-                         horizontal=True, key="s2_eval_mode",
-                         help="Express: estimación inmediata con tu costo medio por kWh. "
-                              "Desglose formal: factura GDMTO completa (energía, demanda, 2% BT, FP, IVA).")
-
-    ahorro_fv_anual = 0.0
-    if eval_mode == "Módulo Express":
-        # Single source of truth: reuse the "Costo medio del recibo" captured
-        # above (per-month if you used the table) instead of asking for it again.
-        costo_monthly = [float(c) for c in cfe_history["costo_medio_mxn_kwh"].tolist()]
-        costo_medio = float(np.mean(costo_monthly)) if costo_monthly else 0.0
-        st.session_state["costo_promedio_kwh"] = costo_medio
-        st.caption(f"Usando el **costo medio del recibo** capturado arriba "
-                   f"(${costo_medio:.2f}/kWh prom.) — edítalo en *Tu consumo CFE*.")
-        pago_actual = sum(k * c for k, c in zip(demand_monthly, costo_monthly))
-        pago_con_fv = sum(max(k - g, 0.0) * c
-                          for k, c, g in zip(demand_monthly, costo_monthly, gen_monthly))
-        ahorro_fv_anual = pago_actual - pago_con_fv
-        ex1, ex2 = st.columns(2)
-        custom_metric(ex1, "Pago anual actual", f"$ {pago_actual:,.2f}")
-        custom_metric(ex2, "Pago anual con FV", f"$ {pago_con_fv:,.2f}",
-                   delta=f"-$ {ahorro_fv_anual:,.2f}", delta_color="inverse")
-        st.caption("Estimación rápida: Σ kWh × costo medio — no requiere el motor tarifario.")
-    else:
-        dr_pct = st.slider("Reducción de demanda facturable por FV (%)", 0, 30, 0,
-                           key="s2_dr_pct",
-                           help="En GDMTO el FV normalmente NO reduce la demanda máxima "
-                                "(suele ocurrir fuera de horas solares). Ajusta sólo si tienes "
-                                "evidencia de coincidencia pico-sol.")
-        calc_gdmto = GDMTOCalculator()
-        proj = calc_gdmto.annual_projection(
-            cfe_history.to_dict("records"), gen_monthly, demand_reduction_pct=float(dr_pct),
-        )
-        annual = proj["annual"]
-        ahorro_fv_anual = annual["savings_mxn"]
-
-        fa1, fa2, fa3, fa4 = st.columns(4)
-        custom_metric(fa1, "Factura anual sin FV", f"$ {annual['orig_total_mxn']:,.2f}")
-        custom_metric(fa2, "Factura anual con FV", f"$ {annual['total_mxn']:,.2f}")
-        custom_metric(fa3, "Ahorro anual", f"$ {annual['savings_mxn']:,.2f}",
-                   delta=f"{annual['savings_mxn'] / annual['orig_total_mxn'] * 100:.1f}%"
-                   if annual["orig_total_mxn"] > 0 else None)
-        custom_metric(fa4, "Tarifa", calc_gdmto.name, help="Componentes calibrados al recibo real.")
-
-        chart_with_export(monthly_savings_bar(proj["monthly"]),
-                          key="s2_monthly_savings", filename="ahorro_mensual_gdmto")
-
-        sel_mes_wf = st.selectbox("Mes para el desglose en cascada", MONTH_ABBR_ES,
-                                  index=4, key="s2_mes_waterfall")
-        bill_sel = proj["monthly"][MONTH_ABBR_ES.index(sel_mes_wf)]
-        chart_with_export(gdmto_savings_waterfall(bill_sel),
-                          key="s2_waterfall", filename="cascada_ahorro_gdmto")
-
-        with st.expander("📄 Ver componentes de la factura por mes"):
-            rows = []
-            for b in proj["monthly"]:
-                rows.append({
-                    "Mes": MONTH_ABBR_ES[b["month"] - 1],
-                    "kWh neto": f"{b['net_kwh']:,.0f}",
-                    "Fijo": f"$ {b['fixed_mxn']:,.2f}",
-                    "Energía": f"$ {b['energy_total_mxn']:,.2f}",
-                    "Demanda": f"$ {b['demand_total_mxn']:,.2f}",
-                    "2% BT": f"$ {b['bt_charge_mxn']:,.2f}",
-                    "FP": f"$ {b['fp_charge_mxn']:,.2f}",
-                    "IVA": f"$ {b['iva_mxn']:,.2f}",
-                    "Total": f"$ {b['total_mxn']:,.2f}",
-                    "Total sin FV": f"$ {b['orig_total_mxn']:,.2f}",
-                    "Ahorro": f"$ {b['savings_mxn']:,.2f}",
-                })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-    # ── E) Rentabilidad de la inversión en paneles: TIR, VPN y recuperación ───
-    st.markdown("##### 📊 Rentabilidad de la inversión en paneles")
-    if s2_fv_capex_mxn > 0 and ahorro_fv_anual > 0:
-        rp1, rp2, rp3 = st.columns(3)
-        fv_life = int(rp1.number_input("Vida del proyecto (años)", min_value=5, max_value=30,
-                                       value=25, step=1, key="s2_fv_life"))
-        fv_infl = rp2.number_input("Inflación tarifaria (%/año)", min_value=0.0, max_value=15.0,
-                                   value=5.0, step=0.5, key="s2_fv_infl")
-        fv_disc = rp3.number_input("Tasa de descuento (%)", min_value=1.0, max_value=25.0,
-                                   value=10.0, step=0.5, key="s2_fv_disc")
-
-        cf_fv = continuity_cashflows(s2_fv_capex_mxn, ahorro_fv_anual,
-                                     fv_life, fv_infl, fv_disc)
-        tir = investment_irr(s2_fv_capex_mxn, ahorro_fv_anual, fv_life, fv_infl)
-        if tir != tir:                       # nan
-            tir_str = "—"
-        elif tir == float("inf"):
-            tir_str = "> 100 %"
-        else:
-            tir_str = f"{tir * 100:.1f} %"
-        pb = cf_fv["payback_years"]
-
-        rr1, rr2, rr3 = st.columns(3)
-        custom_metric(rr1, "TIR (Tasa Interna de Retorno)", tir_str,
-                   help="Cuánto crece cada peso invertido en los paneles por año; "
-                        "rentable cuando supera tu tasa de descuento.")
-        custom_metric(rr2, "VPN (Valor Presente Neto)", f"$ {cf_fv['npv_mxn']:,.2f}",
-                   delta="Rentable" if cf_fv["npv_mxn"] > 0 else "No rentable",
-                   delta_color="normal" if cf_fv["npv_mxn"] > 0 else "inverse",
-                   help="Valor de hoy de los ahorros futuros menos la inversión inicial.")
-        custom_metric(rr3, "Periodo de recuperación",
-                   f"{pb:.1f} años" if pb < 100 else "∞",
-                   help="CAPEX de paneles ÷ ahorro anual (recuperación simple).")
-        st.caption(f"Sobre una inversión FV de **$ {s2_fv_capex_mxn:,.2f} MXN** y un ahorro anual "
-                   f"de **$ {ahorro_fv_anual:,.2f}** creciente con la inflación tarifaria "
-                   "(beneficio·(1+inflación)^(año−1)/(1+descuento)^año).")
-    else:
-        st.info("Ingresa un número de paneles **> 0** y un ahorro FV positivo (evaluación de "
-                "arriba) para ver la TIR, el VPN y el periodo de recuperación.")
-
-    st.session_state["ahorro_fv_anual"] = float(ahorro_fv_anual)
+    # Persist the balance intermediates so the economic evaluation (Sección 4,
+    # tras la Sección de baterías) puede consumirlos sin recalcular.
     st.session_state["s2_gen_monthly"] = gen_monthly
+    st.session_state["s2_demand_monthly"] = demand_monthly
+    st.caption("💡 La **evaluación económica** (ahorro FV, TIR/VPN) aparece en la **Sección 4**, "
+               "después del dimensionamiento de baterías.")
 else:
     st.caption("Activa esta sección para capturar tus recibos y ver el balance demanda vs generación.")
 
@@ -675,10 +577,132 @@ else:
     st.caption("Activa esta sección si los cortes de CFE afectan tu operación.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SECCIÓN 4 — EVALUACIÓN FINANCIERA DE CONTINUIDAD
+# SECCIÓN 4 — EVALUACIÓN ECONÓMICA (tras el dimensionamiento de baterías)
 # ══════════════════════════════════════════════════════════════════════════════
 st.divider()
-st.markdown("## 📈 Sección 4 — Evaluación financiera de continuidad")
+st.markdown("## 📈 Sección 4 — Evaluación económica")
+
+# ── A) Rentabilidad del sistema FV (consume los datos de la Sección 2) ─────────
+# Se evalúa aquí, después de baterías, para que toda la economía quede junta y
+# después del análisis de respaldo. Produce `ahorro_fv_anual`, que la continuidad
+# (parte B) y la página de Economía heredan.
+st.markdown("### 💰 Rentabilidad del sistema fotovoltaico")
+if s2_on:
+    eval_mode = st.radio("Tipo de evaluación", ["Módulo Express", "Desglose formal GDMTO"],
+                         horizontal=True, key="s2_eval_mode",
+                         help="Express: estimación inmediata con tu costo medio por kWh. "
+                              "Desglose formal: factura GDMTO completa (energía, demanda, 2% BT, FP, IVA).")
+
+    ahorro_fv_anual = 0.0
+    if eval_mode == "Módulo Express":
+        costo_monthly = [float(c) for c in cfe_history["costo_medio_mxn_kwh"].tolist()]
+        costo_medio = float(np.mean(costo_monthly)) if costo_monthly else 0.0
+        st.session_state["costo_promedio_kwh"] = costo_medio
+        st.caption(f"Usando el **costo medio del recibo** capturado en la Sección 2 "
+                   f"(${costo_medio:.2f}/kWh prom.).")
+        pago_actual = sum(k * c for k, c in zip(demand_monthly, costo_monthly))
+        pago_con_fv = sum(max(k - g, 0.0) * c
+                          for k, c, g in zip(demand_monthly, costo_monthly, gen_monthly))
+        ahorro_fv_anual = pago_actual - pago_con_fv
+        ex1, ex2 = st.columns(2)
+        custom_metric(ex1, "Pago anual actual", f"$ {pago_actual:,.2f}")
+        custom_metric(ex2, "Pago anual con FV", f"$ {pago_con_fv:,.2f}",
+                   delta=f"-$ {ahorro_fv_anual:,.2f}", delta_color="inverse")
+        st.caption("Estimación rápida: Σ kWh × costo medio — no requiere el motor tarifario.")
+    else:
+        dr_pct = st.slider("Reducción de demanda facturable por FV (%)", 0, 30, 0,
+                           key="s2_dr_pct",
+                           help="En GDMTO el FV normalmente NO reduce la demanda máxima "
+                                "(suele ocurrir fuera de horas solares). Ajusta sólo si tienes "
+                                "evidencia de coincidencia pico-sol.")
+        calc_gdmto = GDMTOCalculator()
+        proj = calc_gdmto.annual_projection(
+            cfe_history.to_dict("records"), gen_monthly, demand_reduction_pct=float(dr_pct),
+        )
+        annual = proj["annual"]
+        ahorro_fv_anual = annual["savings_mxn"]
+
+        fa1, fa2, fa3, fa4 = st.columns(4)
+        custom_metric(fa1, "Factura anual sin FV", f"$ {annual['orig_total_mxn']:,.2f}")
+        custom_metric(fa2, "Factura anual con FV", f"$ {annual['total_mxn']:,.2f}")
+        custom_metric(fa3, "Ahorro anual", f"$ {annual['savings_mxn']:,.2f}",
+                   delta=f"{annual['savings_mxn'] / annual['orig_total_mxn'] * 100:.1f}%"
+                   if annual["orig_total_mxn"] > 0 else None)
+        custom_metric(fa4, "Tarifa", calc_gdmto.name, help="Componentes calibrados al recibo real.")
+
+        chart_with_export(monthly_savings_bar(proj["monthly"]),
+                          key="s2_monthly_savings", filename="ahorro_mensual_gdmto")
+
+        sel_mes_wf = st.selectbox("Mes para el desglose en cascada", MONTH_ABBR_ES,
+                                  index=4, key="s2_mes_waterfall")
+        bill_sel = proj["monthly"][MONTH_ABBR_ES.index(sel_mes_wf)]
+        chart_with_export(gdmto_savings_waterfall(bill_sel),
+                          key="s2_waterfall", filename="cascada_ahorro_gdmto")
+
+        with st.expander("📄 Ver componentes de la factura por mes"):
+            rows = []
+            for b in proj["monthly"]:
+                rows.append({
+                    "Mes": MONTH_ABBR_ES[b["month"] - 1],
+                    "kWh neto": f"{b['net_kwh']:,.0f}",
+                    "Fijo": f"$ {b['fixed_mxn']:,.2f}",
+                    "Energía": f"$ {b['energy_total_mxn']:,.2f}",
+                    "Demanda": f"$ {b['demand_total_mxn']:,.2f}",
+                    "2% BT": f"$ {b['bt_charge_mxn']:,.2f}",
+                    "FP": f"$ {b['fp_charge_mxn']:,.2f}",
+                    "IVA": f"$ {b['iva_mxn']:,.2f}",
+                    "Total": f"$ {b['total_mxn']:,.2f}",
+                    "Total sin FV": f"$ {b['orig_total_mxn']:,.2f}",
+                    "Ahorro": f"$ {b['savings_mxn']:,.2f}",
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    st.markdown("##### 📊 Rentabilidad de la inversión en paneles")
+    if s2_fv_capex_mxn > 0 and ahorro_fv_anual > 0:
+        rp1, rp2, rp3 = st.columns(3)
+        fv_life = int(rp1.number_input("Vida del proyecto (años)", min_value=5, max_value=30,
+                                       value=25, step=1, key="s2_fv_life"))
+        fv_infl = rp2.number_input("Inflación tarifaria (%/año)", min_value=0.0, max_value=15.0,
+                                   value=5.0, step=0.5, key="s2_fv_infl")
+        fv_disc = rp3.number_input("Tasa de descuento (%)", min_value=1.0, max_value=25.0,
+                                   value=10.0, step=0.5, key="s2_fv_disc")
+
+        cf_fv = continuity_cashflows(s2_fv_capex_mxn, ahorro_fv_anual,
+                                     fv_life, fv_infl, fv_disc)
+        tir = investment_irr(s2_fv_capex_mxn, ahorro_fv_anual, fv_life, fv_infl)
+        if tir != tir:                       # nan
+            tir_str = "—"
+        elif tir == float("inf"):
+            tir_str = "> 100 %"
+        else:
+            tir_str = f"{tir * 100:.1f} %"
+        pb = cf_fv["payback_years"]
+
+        rr1, rr2, rr3 = st.columns(3)
+        custom_metric(rr1, "TIR (Tasa Interna de Retorno)", tir_str,
+                   help="Cuánto crece cada peso invertido en los paneles por año; "
+                        "rentable cuando supera tu tasa de descuento.")
+        custom_metric(rr2, "VPN (Valor Presente Neto)", f"$ {cf_fv['npv_mxn']:,.2f}",
+                   delta="Rentable" if cf_fv["npv_mxn"] > 0 else "No rentable",
+                   delta_color="normal" if cf_fv["npv_mxn"] > 0 else "inverse",
+                   help="Valor de hoy de los ahorros futuros menos la inversión inicial.")
+        custom_metric(rr3, "Periodo de recuperación",
+                   f"{pb:.1f} años" if pb < 100 else "∞",
+                   help="CAPEX de paneles ÷ ahorro anual (recuperación simple).")
+        st.caption(f"Sobre una inversión FV de **$ {s2_fv_capex_mxn:,.2f} MXN** y un ahorro anual "
+                   f"de **$ {ahorro_fv_anual:,.2f}** creciente con la inflación tarifaria "
+                   "(beneficio·(1+inflación)^(año−1)/(1+descuento)^año).")
+    else:
+        st.info("Ingresa un número de paneles **> 0** (Sección 2) y un ahorro FV positivo "
+                "para ver la TIR, el VPN y el periodo de recuperación.")
+
+    st.session_state["ahorro_fv_anual"] = float(ahorro_fv_anual)
+else:
+    st.caption("Activa la **Sección 2** (Tu consumo CFE) para evaluar el ahorro FV, la TIR y el VPN.")
+
+# ── B) Continuidad ante apagones (batería ± FV) ───────────────────────────────
+st.divider()
+st.markdown("### 🛡️ Continuidad de negocio ante apagones")
 s4_on = st.checkbox("Análisis avanzado de continuidad", key="s4_enabled")
 if s4_on:
     bess = st.session_state.get("bess_proposal")
