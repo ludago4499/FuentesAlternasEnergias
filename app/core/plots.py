@@ -424,6 +424,37 @@ def continuity_cashflow_bar(
     return fig
 
 
+def tradeoff_npv_bar(option_labels: list[str], capex_mxn: list[float],
+                     npv_mxn: list[float]) -> go.Figure:
+    """
+    Side-by-side CAPEX vs NPV bars for 2+ technology options (active cooling
+    vs extra modules, FV vs BESS…). NPV bars are green when positive and red
+    when negative so the winning option reads at a glance.
+    """
+    npv_colors = [GREEN if v > 0 else RED for v in npv_mxn]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        name="Inversión (CAPEX)", x=option_labels, y=list(capex_mxn),
+        marker_color=LIGHT_BLUE,
+        hovertemplate="%{x}<br>CAPEX: $%{y:,.0f}<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        name="VPN del proyecto", x=option_labels, y=list(npv_mxn),
+        marker_color=npv_colors,
+        hovertemplate="%{x}<br>VPN: $%{y:,.0f}<extra></extra>",
+    ))
+    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+    fig.update_layout(
+        barmode="group",
+        template="plotly_white",
+        yaxis_title="MXN",
+        height=360,
+        legend=dict(orientation="h", y=-0.15),
+        margin=dict(t=10, b=60),
+    )
+    return fig
+
+
 def battery_dispatch_plot(
     demand_kw: pd.Series,
     solar_kw: pd.Series,

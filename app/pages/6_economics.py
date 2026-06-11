@@ -3,19 +3,25 @@ Streger Solar — Evaluación Financiera de Continuidad de Negocio
 Tecnológico de Monterrey
 
 Página económica. Hereda **limpiamente** las variables generadas por el análisis
-de baterías y de FV; aquí no se recalcula nada pesado, sólo se evalúa el ROI y el
-flujo de caja con y sin paneles.
+de baterías y de FV; aquí no se recalcula generación, sólo se evalúa el ROI, el
+flujo de caja y los trade-offs tecnológicos.
 
 Variables heredadas (st.session_state):
   Cotización / CAPEX de baterías
       - Página Baterías  : battery_capex_usd · use_battery (× usd_mxn → MXN)
       - Sección 3 (main) : bess_proposal["capex_mxn"]
-  Ahorro y CAPEX FV
-      - ahorro_fv_anual · s2_fv_capex_mxn (opcionales)
+  Ahorro, CAPEX y generación FV
+      - ahorro_fv_anual · s2_fv_capex_mxn · s2_gen_monthly · s2_panel (opcionales)
   Costo de apagones
       - outage_cost_annual (input manual de esta página)
 
-Outputs: ROI y cashflow mensual con y sin paneles (pérdidas operativas evitadas).
+Outputs:
+  1. ROI / VPN / TIR / LCOE con supuestos FV avanzados (degradación + O&M
+     + CAPEX llave en mano).
+  2. Cashflow anual: histograma de flujos mensuales netos a valor presente
+     (ahorro energético FV + apagones evitados − inversión batería/FV).
+  3. Trade-off tecnológico: enfriamiento activo vs módulos extra, y
+     FV vs BESS (costo de oportunidad).
 """
 
 import sys
@@ -24,8 +30,9 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from core.resilience import continuity_cashflows
-from core.plots import continuity_cashflow_bar
+from core.pv_finance import (annual_net_benefits, series_cashflows, cashflow_irr,
+                             lcoe_mxn_kwh, cooling_vs_extra_panels, investment_metrics)
+from core.plots import continuity_cashflow_bar, tradeoff_npv_bar
 from core.exporting import chart_with_export
 from core.state import keep_state
 from utils.theming import inject_theme, custom_metric
@@ -40,14 +47,24 @@ st.caption("Evalúa el retorno económico con y sin paneles. La batería es **op
            "sólo el sistema FV y/o las pérdidas por apagones evitadas.")
 
 
-def _roi_total_continuidad(capex_mxn, annual_benefit_mxn, project_life, inflation_pct):
-    """ROI total simple sobre la vida del proyecto con beneficio creciente por inflación."""
+def _roi_total(capex_mxn: float, nominal_benefits: list[float]) -> float:
+    """Simple lifetime ROI (%) over nominal (undiscounted) net benefits."""
     if capex_mxn <= 0:
         return float("nan")
-    infl = inflation_pct / 100.0
-    total = sum(annual_benefit_mxn * ((1 + infl) ** (yr - 1))
-                for yr in range(1, project_life + 1))
+    total = sum(nominal_benefits)
     return (total - capex_mxn) / capex_mxn * 100.0
+
+
+def _fmt_pct(v: float) -> str:
+    if v != v:                      # nan
+        return "—"
+    if v == float("inf"):
+        return "> 100 %"
+    return f"{v * 100:.1f} %"
+
+
+def _fmt_years(v: float) -> str:
+    return f"{v:.1f} años" if v < 100 else "∞"
 
 
 # ── Variables heredadas: CAPEX de baterías ────────────────────────────────────
@@ -102,10 +119,40 @@ inflation_pct = fp2.number_input("Inflación (%/año)", min_value=0.0, max_value
 discount_pct = fp3.number_input("Tasa de descuento (%)", min_value=1.0, max_value=25.0,
                                 value=10.0, step=0.5, key="cont_disc")
 
-# ── Variables heredadas: ahorro y CAPEX FV ────────────────────────────────────
+# ── Variables heredadas: ahorro, CAPEX y generación FV ────────────────────────
 ahorro_fv = float(st.session_state.get("ahorro_fv_anual", 0.0))
-fv_capex = float(st.session_state.get("s2_fv_capex_mxn", 0.0))
-_fv_on = fv_capex > 0 or ahorro_fv > 0
+fv_capex_mod = float(st.session_state.get("s2_fv_capex_mxn", 0.0))
+gen_monthly = st.session_state.get("s2_gen_monthly") or []
+annual_gen_kwh = float(sum(gen_monthly))
+costo_kwh = float(st.session_state.get("costo_promedio_kwh", 2.67))
+_fv_on = fv_capex_mod > 0 or ahorro_fv > 0
+
+# ── Supuestos avanzados del sistema FV ────────────────────────────────────────
+with st.expander("⚙️ Supuestos avanzados del sistema FV", expanded=_fv_on):
+    st.caption("El CAPEX heredado de la Sección 2 cubre **sólo los módulos** (Wp × $/W). "
+               "Un sistema llave en mano (inversor, estructura, BOS, instalación, trámites "
+               "CFE) cuesta típicamente **1.8–2.5×** el costo de los módulos.")
+    av1, av2, av3 = st.columns(3)
+    capex_factor = av1.slider("Factor llave en mano (× módulos)", min_value=1.0,
+                              max_value=3.0, value=2.0, step=0.1, key="eco_capex_factor",
+                              help="Multiplica el CAPEX de módulos para aproximar el costo "
+                                   "instalado completo. 1.0 = sólo módulos (como en la "
+                                   "página principal).")
+    degradation_pct = av2.number_input("Degradación del panel (%/año)", min_value=0.0,
+                                       max_value=2.0, value=0.5, step=0.05, format="%.2f",
+                                       key="eco_degradation",
+                                       help="Pérdida anual de generación (típico 0.4–0.6 %/año; "
+                                            "la garantía de potencia del fabricante la acota).")
+    om_pct = av3.number_input("O&M anual (% del CAPEX FV)", min_value=0.0, max_value=5.0,
+                              value=1.0, step=0.25, format="%.2f", key="eco_om_pct",
+                              help="Limpieza, monitoreo y seguros, creciente con inflación.")
+
+    fv_capex = fv_capex_mod * capex_factor
+    om_annual = fv_capex * om_pct / 100.0
+    if _fv_on:
+        st.markdown(f"**CAPEX FV instalado:** $ {fv_capex:,.2f} MXN "
+                    f"(módulos $ {fv_capex_mod:,.2f} × {capex_factor:.1f}) · "
+                    f"**O&M:** $ {om_annual:,.2f} MXN/año")
 
 st.markdown(f"**CAPEX baterías:** $ {capex_batt:,.2f} MXN · **CAPEX FV:** $ {fv_capex:,.2f} MXN · "
             f"**Beneficio anual:** apagones evitados $ {outage_cost:,.2f}"
@@ -119,22 +166,29 @@ if outage_cost <= 0 and ahorro_fv <= 0:
     st.stop()
 
 # ── Escenarios: sin paneles (batería sola) y con paneles (batería + FV) ────────
-cf_sin = continuity_cashflows(capex_batt, outage_cost,
-                              int(project_life), inflation_pct, discount_pct)
-cf_con = continuity_cashflows(capex_batt + fv_capex, outage_cost + ahorro_fv,
-                              int(project_life), inflation_pct, discount_pct)
+# FV saving degrades with the panels and pays O&M; the avoided-outage benefit
+# only grows with inflation. Mixing both dynamics requires the series API.
+fv_benefits = annual_net_benefits(ahorro_fv, int(project_life), inflation_pct,
+                                  degradation_pct if _fv_on else 0.0,
+                                  om_annual if _fv_on else 0.0)
+outage_benefits = annual_net_benefits(outage_cost, int(project_life), inflation_pct)
+con_benefits = [f + o for f, o in zip(fv_benefits, outage_benefits)]
 
-roi_sin = _roi_total_continuidad(capex_batt, outage_cost, int(project_life), inflation_pct)
-roi_con = _roi_total_continuidad(capex_batt + fv_capex, outage_cost + ahorro_fv,
-                                 int(project_life), inflation_pct)
+cf_sin = series_cashflows(capex_batt, outage_benefits, discount_pct)
+cf_con = series_cashflows(capex_batt + fv_capex, con_benefits, discount_pct)
+
+roi_sin = _roi_total(capex_batt, outage_benefits)
+roi_con = _roi_total(capex_batt + fv_capex, con_benefits)
+irr_sin = cashflow_irr(capex_batt, outage_benefits)
+irr_con = cashflow_irr(capex_batt + fv_capex, con_benefits)
 
 
 def _roi_str(v: float) -> str:
     return f"{v:,.0f} %" if v == v else "—"   # v != v → nan
 
 
-# ── Output 1: ROI y VPN por pérdidas evitadas ─────────────────────────────────
-st.subheader("ROI y VPN")
+# ── Output 1: ROI, VPN, TIR y LCOE ────────────────────────────────────────────
+st.subheader("ROI, VPN y TIR")
 if _fv_on:
     o1, o2, o3, o4 = st.columns(4)
     custom_metric(o1, "ROI sin paneles", _roi_str(roi_sin))
@@ -145,16 +199,39 @@ if _fv_on:
     custom_metric(o4, "VPN con paneles", f"$ {cf_con['npv_mxn']:,.2f}",
                   delta="Rentable" if cf_con["npv_mxn"] > 0 else "No rentable",
                   delta_color="normal" if cf_con["npv_mxn"] > 0 else "inverse")
+    o5, o6, o7, o8 = st.columns(4)
+    custom_metric(o5, "TIR sin paneles", _fmt_pct(irr_sin),
+                  help="Tasa que anula el VPN del escenario sólo-batería.")
+    custom_metric(o6, "TIR con paneles", _fmt_pct(irr_con),
+                  help="Tasa que anula el VPN del escenario batería + FV; "
+                       "rentable cuando supera la tasa de descuento.")
+    custom_metric(o7, "Payback con paneles", _fmt_years(cf_con["payback_years"]),
+                  help="Años para recuperar la inversión con beneficios nominales "
+                       "(inflación − degradación − O&M).")
+    if annual_gen_kwh > 0 and fv_capex > 0:
+        lcoe = lcoe_mxn_kwh(fv_capex, annual_gen_kwh, int(project_life), discount_pct,
+                            degradation_pct, om_annual, inflation_pct)
+        custom_metric(o8, "LCOE del sistema FV", f"$ {lcoe:.2f}/kWh",
+                      delta=f"CFE $ {costo_kwh:.2f}/kWh",
+                      delta_color="normal" if lcoe < costo_kwh else "inverse",
+                      help="Costo nivelado de cada kWh solar sobre la vida del proyecto "
+                           "(CAPEX + O&M descontados ÷ energía descontada). Si es menor "
+                           "al costo CFE, cada kWh solar sale más barato que comprarlo.")
 else:
-    o1, o2 = st.columns(2)
+    o1, o2, o3 = st.columns(3)
     custom_metric(o1, "ROI sin paneles", _roi_str(roi_sin))
     custom_metric(o2, "VPN sin paneles", f"$ {cf_sin['npv_mxn']:,.2f}",
                   delta="Rentable" if cf_sin["npv_mxn"] > 0 else "No rentable",
                   delta_color="normal" if cf_sin["npv_mxn"] > 0 else "inverse")
+    custom_metric(o3, "TIR sin paneles", _fmt_pct(irr_sin))
     st.caption("Sin datos de paneles; se muestra sólo el escenario por pérdidas evitadas.")
 
-# ── Output 2: cashflow mensual con y sin paneles ──────────────────────────────
-st.subheader("Cashflow mensual con y sin paneles")
+# ── Output 2: Cashflow anual (histograma de flujos mensuales netos a VP) ──────
+st.subheader("Cashflow anual — flujos mensuales netos a valor presente")
+st.caption("Histograma de los flujos netos a valor presente: ahorro por consumo energético "
+           "(FV, con degradación y O&M)"
+           + (" + apagones evitados" if outage_cost > 0 else "")
+           + " − inversión en baterías y FV (mes 0).")
 chart_with_export(
     continuity_cashflow_bar(
         cf_con["months"], cf_con["monthly_pv_flows"], cf_sin["monthly_pv_flows"],
@@ -162,5 +239,134 @@ chart_with_export(
     ),
     key="cont_cashflow", filename="flujo_continuidad",
 )
-st.caption("Flujos mensuales **a valor presente** (mes 0 = CAPEX inicial negativo). "
-           "Beneficio·(1+inflación)^(año−1)/(1+descuento)^año.")
+st.caption("Mes 0 = CAPEX inicial negativo. Cada año: "
+           "[ahorro·(1+inflación)^(año−1)·(1−degradación)^(año−1) − O&M] / (1+descuento)^año, "
+           "repartido en 12 meses; las barras suman exactamente el VPN.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Trade-off tecnológico
+# ══════════════════════════════════════════════════════════════════════════════
+st.divider()
+st.subheader("⚖️ Trade-off tecnológico")
+
+# ── A) Enfriamiento activo vs módulos adicionales ─────────────────────────────
+st.markdown("#### ❄️ Enfriamiento activo vs módulos adicionales")
+panel = st.session_state.get("s2_panel")
+n_panels = int(st.session_state.get("s2_n_panels_input", 0) or 0)
+
+if annual_gen_kwh <= 0 or panel is None or n_panels <= 0:
+    st.info("Necesitas la generación FV de la **Sección 2** (paneles > 0 en la página "
+            "principal) para evaluar este trade-off.")
+else:
+    st.caption("¿Conviene invertir en enfriar los paneles para recuperar la energía perdida "
+               "por temperatura, o es más barato instalar módulos adicionales que generen "
+               "esa misma energía? ⚠️ La pérdida térmica es una **estimación gruesa** "
+               "(el modelo térmico detallado está pendiente).")
+    tc1, tc2, tc3, tc4 = st.columns(4)
+    temp_loss_pct = tc1.number_input("Pérdida térmica anual (%)", min_value=0.0,
+                                     max_value=20.0, value=5.0, step=0.5, format="%.1f",
+                                     key="eco_temp_loss",
+                                     help="Energía anual perdida por operar las celdas por "
+                                          "encima de 25 °C (derating NOCT). Estimación típica "
+                                          "en clima mexicano: 4–8 %.")
+    recovery_pct = tc2.number_input("Recuperación con enfriamiento (%)", min_value=0.0,
+                                    max_value=100.0, value=60.0, step=5.0, format="%.0f",
+                                    key="eco_cool_recovery",
+                                    help="Fracción de la pérdida térmica que el sistema de "
+                                         "enfriamiento activo logra recuperar.")
+    cooling_capex = tc3.number_input("CAPEX enfriamiento (MXN)", min_value=0.0,
+                                     value=float(n_panels * 800.0), step=1000.0, format="%.0f",
+                                     key="eco_cool_capex",
+                                     help="Aspersores/ventilación + bombas + control. "
+                                          "Por defecto ≈ $800 MXN por panel.")
+    cooling_opex = tc4.number_input("OPEX enfriamiento (MXN/año)", min_value=0.0,
+                                    value=float(cooling_capex * 0.05), step=500.0, format="%.0f",
+                                    key="eco_cool_opex",
+                                    help="Agua, bombeo y mantenimiento anual del sistema "
+                                         "de enfriamiento.")
+
+    panel_capex_mxn = panel["wp"] * panel["usd_per_w"] * usd_mxn * capex_factor
+    panel_kwh_yr = annual_gen_kwh / n_panels
+
+    trade = cooling_vs_extra_panels(
+        annual_gen_kwh, temp_loss_pct, recovery_pct, cooling_capex, cooling_opex,
+        panel_kwh_yr, panel_capex_mxn, costo_kwh,
+        int(project_life), inflation_pct, discount_pct, degradation_pct,
+    )
+
+    ta1, ta2, ta3 = st.columns(3)
+    custom_metric(ta1, "Energía recuperable", f"{trade['recovered_kwh_yr']:,.0f} kWh/año",
+                  help="Pérdida térmica × recuperación del enfriamiento.")
+    custom_metric(ta2, "Módulos equivalentes", f"{trade['extra_panels']}",
+                  help=f"Paneles {panel['brand']} {panel['model']} extra que generan la "
+                       f"misma energía ({panel_kwh_yr:,.0f} kWh/año c/u, "
+                       f"$ {panel_capex_mxn:,.0f} MXN c/u instalado).")
+    custom_metric(ta3, "CAPEX por kWh/año",
+                  f"❄️ $ {trade['cooling_capex_per_kwh_yr']:,.0f} vs "
+                  f"➕ $ {trade['panels_capex_per_kwh_yr']:,.0f}",
+                  help="Inversión por cada kWh anual ganado: enfriamiento vs módulos extra.")
+
+    chart_with_export(
+        tradeoff_npv_bar(
+            ["❄️ Enfriamiento activo", "➕ Módulos adicionales"],
+            [trade["cooling_capex_mxn"], trade["panels_capex_mxn"]],
+            [trade["cooling_npv_mxn"], trade["panels_npv_mxn"]],
+        ),
+        key="eco_tradeoff_cooling", filename="tradeoff_enfriamiento",
+    )
+    if trade["winner"] == "cooling":
+        st.success(f"✅ **Veredicto de ingeniería:** el enfriamiento activo es más rentable "
+                   f"(VPN $ {trade['cooling_npv_mxn']:,.0f} vs "
+                   f"$ {trade['panels_npv_mxn']:,.0f} de los módulos extra), porque recupera "
+                   f"{trade['recovered_kwh_yr']:,.0f} kWh/año con menor inversión por kWh.")
+    else:
+        st.success(f"✅ **Veredicto de ingeniería:** conviene añadir **{trade['extra_panels']} "
+                   f"módulos** (VPN $ {trade['panels_npv_mxn']:,.0f} vs "
+                   f"$ {trade['cooling_npv_mxn']:,.0f} del enfriamiento). Los módulos no "
+                   f"tienen OPEX de bombeo/agua y su costo por kWh anual es menor.")
+
+# ── B) Costo de oportunidad: FV vs BESS ───────────────────────────────────────
+st.markdown("#### 🔆 FV vs 🔋 BESS — costo de oportunidad")
+if not _fv_on or fv_capex <= 0:
+    st.info("Completa la **Sección 2** (ahorro FV) para comparar el rendimiento de cada "
+            "peso invertido en paneles vs en baterías.")
+elif capex_batt <= 0 or outage_cost <= 0:
+    st.info("Para comparar contra el BESS necesitas una **cotización de baterías** y un "
+            "**costo anual por apagones** mayores a 0 (el beneficio de la batería en GDMTO "
+            "es la continuidad).")
+else:
+    st.caption("Cada peso tiene un costo de oportunidad: ¿rinde más invertido en paneles "
+               "(ahorro tarifario) o en el banco de baterías (apagones evitados)?")
+    m_fv = investment_metrics(fv_capex, ahorro_fv, int(project_life), inflation_pct,
+                              discount_pct, degradation_pct, om_annual)
+    m_bess = investment_metrics(capex_batt, outage_cost, int(project_life), inflation_pct,
+                                discount_pct)
+
+    tb1, tb2, tb3, tb4 = st.columns(4)
+    custom_metric(tb1, "TIR FV", _fmt_pct(m_fv["irr"]))
+    custom_metric(tb2, "TIR BESS", _fmt_pct(m_bess["irr"]))
+    custom_metric(tb3, "VPN por peso — FV", f"$ {m_fv['npv_per_peso']:.2f}",
+                  help="VPN ÷ CAPEX: valor presente neto generado por cada peso invertido.")
+    custom_metric(tb4, "VPN por peso — BESS", f"$ {m_bess['npv_per_peso']:.2f}",
+                  help="VPN ÷ CAPEX: valor presente neto generado por cada peso invertido.")
+
+    chart_with_export(
+        tradeoff_npv_bar(
+            ["🔆 Sistema FV", "🔋 BESS (continuidad)"],
+            [m_fv["capex_mxn"], m_bess["capex_mxn"]],
+            [m_fv["npv_mxn"], m_bess["npv_mxn"]],
+        ),
+        key="eco_tradeoff_fv_bess", filename="tradeoff_fv_bess",
+    )
+
+    if m_fv["npv_per_peso"] >= m_bess["npv_per_peso"]:
+        st.success(f"✅ **Veredicto:** cada peso invertido en **FV** rinde más "
+                   f"($ {m_fv['npv_per_peso']:.2f} vs $ {m_bess['npv_per_peso']:.2f} de VPN "
+                   f"por peso). El BESS se justifica como **seguro de continuidad**, no como "
+                   f"inversión de retorno: prioriza FV y dimensiona la batería al mínimo "
+                   f"respaldo necesario.")
+    else:
+        st.success(f"✅ **Veredicto:** con un costo de apagones de $ {outage_cost:,.0f}/año, "
+                   f"el **BESS** rinde más por peso invertido ($ {m_bess['npv_per_peso']:.2f} "
+                   f"vs $ {m_fv['npv_per_peso']:.2f}). La continuidad domina: asegura el "
+                   f"respaldo antes de ampliar el arreglo FV.")
