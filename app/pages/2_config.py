@@ -111,48 +111,6 @@ if st.session_state["tariff_mode"] == "GDMTO":
                "**principal** (Vista Rápida → Secciones 2–4). Esta página sigue siendo útil para "
                "elegir panel, ubicación fina y tipo de cambio.")
 
-# ── RESIDENTIAL TARIFFS 1A–1F (informative tool) ──────────────────────────────
-# Bajo GDMTH el cliente es de media tensión horaria: la herramienta residencial
-# (y su deslizable) no aplica, así que se oculta para una interfaz más limpia.
-if st.session_state["tariff_mode"] != "GDMTH":
-    with st.expander("🏠 Tarifas residenciales 1A–1F — bloques y umbral DAC", expanded=False):
-        import sys as _sys
-        _sys.path.insert(0, str(Path(__file__).parent.parent))
-        from core.residential import classify, BLOCK_LABELS, TARIFFS as RES_TARIFFS, LIMITS as RES_LIMITS
-        from core.plots import residential_blocks_bar
-        from core.exporting import chart_with_export
-
-        st.caption("Acumulador de bloques **por bimestre**: el consumo llena Básico → Intermedio → "
-                   "Verano 1 → Verano 2 y el resto se factura como **Excedente**. Si superas el "
-                   "límite DAC pasas a tarifa Doméstica de Alto Consumo.")
-        cr1, cr2 = st.columns([1, 2])
-        res_tarifa = cr1.selectbox("Tarifa", RES_TARIFFS, index=2)
-        res_kwh = cr2.number_input("Consumo del bimestre (kWh)", min_value=0.0,
-                                   value=900.0, step=10.0, format="%.0f")
-
-        res = classify(res_kwh, res_tarifa)
-        chart_with_export(residential_blocks_bar(res["blocks"], res["dac_kwh_bimestre"]),
-                          key="res_blocks", filename="bloques_residenciales")
-
-        _lims = RES_LIMITS[res_tarifa]
-        _rows = []
-        for _b in ["basico", "intermedio", "verano1", "verano2", "excedente"]:
-            _cap = _lims.get(_b)
-            _rows.append({
-                "Bloque": BLOCK_LABELS[_b],
-                "Límite (kWh/bim)": "resto" if _b == "excedente" else ("—" if _cap is None else f"{_cap:,}"),
-                "Consumo asignado (kWh)": f"{res['blocks'][_b]:,.0f}",
-            })
-        st.dataframe(pd.DataFrame(_rows), hide_index=True, use_container_width=True)
-
-        if res["dac"]:
-            st.error(f"⚠️ **DAC**: {res_kwh:,.0f} kWh supera el límite de "
-                     f"{res['dac_kwh_bimestre']:,} kWh/bimestre para {res_tarifa} — "
-                     "el servicio se reclasifica como Doméstica de Alto Consumo.")
-        else:
-            st.success(f"✅ Dentro del límite DAC ({res['dac_kwh_bimestre']:,} kWh/bimestre "
-                       f"para {res_tarifa}).")
-
 # ── LOCATION ──────────────────────────────────────────────────────────────────
 st.markdown("## 📍 Ubicación")
 col_city, col_region = st.columns([2, 1])
