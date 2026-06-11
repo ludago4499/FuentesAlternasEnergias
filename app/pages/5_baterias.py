@@ -4,10 +4,12 @@ from pathlib import Path
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.gdmth import GDMTHCalculator
 from core.battery import load_batteries, evaluate, optimize_units, classify_periods
+from core.resilience import propose_bess, size_bess, kva_to_kw
 from core.plots import (
     battery_dispatch_plot,
     battery_cost_comparison_bar,
@@ -37,21 +39,143 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("""
+_bat_subtitle = (
+    "Recorte de pico (peak shaving) con carga 100% solar: elige el umbral, la ventana horaria y "
+    "el arreglo, y observa cómo cambian las curvas de demanda y de gasto."
+    if st.session_state.get("tariff_mode", "GDMTO") == "GDMTH" else
+    "Dimensionamiento de respaldo ante apagones: elige la carga crítica y las horas de respaldo, "
+    "y observa la propuesta óptima, su sensibilidad y las alternativas del catálogo."
+)
+st.markdown(f"""
 <div class="bat-banner">
     <h1>🔋 Almacenamiento con Baterías</h1>
-    <p>Recorte de pico (peak shaving) con carga 100% solar: elige el umbral, la ventana horaria y el arreglo, y observa cómo cambian las curvas de demanda y de gasto.</p>
+    <p>{_bat_subtitle}</p>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Tariff-mode branch: peak shaving only makes sense under GDMTH ─────────────
+# ── Tariff-mode branch ────────────────────────────────────────────────────────
+# GDMTH → peak shaving (resto de la página). GDMTO → no hay periodos horarios, así
+# que el valor de la batería es la CONTINUIDAD (respaldo ante apagones): aquí se
+# da el análisis de respaldo especializado en vez de redirigir.
 if st.session_state.get("tariff_mode", "GDMTO") == "GDMTO":
+    usd_mxn = st.session_state.get("usd_mxn", 17.5)
     st.info(
-        "🔀 Modo tarifario actual: **GDMTO** (sin periodos horarios). El recorte de Punta no aplica: "
-        "bajo GDMTO la batería se justifica por **resiliencia ante apagones**. "
-        "Usa la página **principal** (Sección 3 — Resiliencia y Sección 4 — Continuidad). "
-        "Cambia el modo a GDMTH en ⚙️ **Configuración** para el análisis de peak shaving."
+        "🔀 Modo tarifario actual: **GDMTO** (tarifa plana, sin periodos horarios). El recorte de "
+        "Punta no aplica; aquí la batería se dimensiona por **respaldo ante apagones** "
+        "(continuidad operativa). Cambia a GDMTH en ⚙️ **Configuración** para el peak shaving horario."
     )
+
+    # ── 1) Carga crítica y duración de respaldo ───────────────────────────────
+    st.markdown("<h3 class='section-title'>1️⃣ Carga crítica y duración de respaldo</h3>",
+                unsafe_allow_html=True)
+    cL1, cL2, cL3 = st.columns([2, 1, 1])
+    load_val = cL1.number_input(
+        "Carga crítica a respaldar", min_value=0.0,
+        value=float(st.session_state.get("gdmto_crit_load_val", 20.0)), step=1.0, format="%.1f",
+        key="gdmto_crit_load_val",
+        help="Equipos que DEBEN seguir operando durante el apagón (refrigeración, servidores, "
+             "bombas, iluminación de seguridad…).",
+    )
+    load_unit = cL2.selectbox("Unidad", ["kW", "kVA"], key="gdmto_crit_load_unit")
+    if load_unit == "kVA":
+        fp_load = cL3.number_input("FP de la carga (%)", min_value=50.0, max_value=100.0,
+                                   value=89.89, step=0.01, format="%.2f", key="gdmto_crit_fp")
+        p_crit_kw = kva_to_kw(load_val, fp_load)
+        st.caption(f"kW = kVA × FP/100 → **{p_crit_kw:.1f} kW**")
+    else:
+        p_crit_kw = load_val
+
+    backup_hours = st.slider(
+        "🕒 Horas de respaldo requeridas (intervalo del apagón a cubrir)",
+        min_value=1, max_value=24,
+        value=int(st.session_state.get("backup_hours", 0) or 4), step=1, key="gdmto_backup_hours",
+        help="Duración del corte de CFE que el banco debe sostener alimentando la carga crítica.",
+    )
+    st.session_state["backup_hours"] = int(backup_hours)
+    st.session_state["critical_load_kw"] = float(p_crit_kw)
+
+    if p_crit_kw <= 0:
+        st.warning("Ingresa una carga crítica mayor a 0 para dimensionar el banco de baterías.")
+        st.session_state["bess_proposal"] = None
+        st.stop()
+
+    prop = propose_bess(float(p_crit_kw), float(backup_hours), usd_mxn=usd_mxn)
+    best = prop["best"]
+    st.session_state["bess_proposal"] = best
+    if best is None:
+        st.warning("Ningún modelo del catálogo cumple la energía y potencia requeridas.")
+        st.stop()
+
+    # ── 2) Propuesta automática ───────────────────────────────────────────────
+    st.markdown("<h3 class='section-title'>2️⃣ Propuesta automática (menor CAPEX que cumple)</h3>",
+                unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown(f"**{best['brand']} {best['model']}** · {best['chemistry']} · requiere "
+                    f"**{best['e_req_kwh']:,.1f} kWh** para {backup_hours} h de respaldo a "
+                    f"{p_crit_kw:,.1f} kW")
+        pc1, pc2, pc3, pc4 = st.columns(4)
+        custom_metric(pc1, "Unidades", f"{best['units']}")
+        custom_metric(pc2, "Energía útil", f"{best['total_usable_kwh']:,.1f} kWh")
+        custom_metric(pc3, "Potencia", f"{best['total_power_kw']:,.1f} kW")
+        custom_metric(pc4, "CAPEX", f"$ {best['capex_mxn']:,.0f} MXN",
+                      help=f"$ {best['capex_usd']:,.0f} USD × TDC {usd_mxn:.2f}")
+        pc5, pc6, pc7 = st.columns(3)
+        custom_metric(pc5, "Ciclos", f"{best['cycles']:,}",
+                      help=f"Banda típica LiFePO4: {best['cycle_band']} ciclos.")
+        custom_metric(pc6, "Vida (ciclado diario)", f"{best['life_years_daily_cycling']:.1f} años",
+                      help=best["life_note"])
+        custom_metric(pc7, "DoD / Eficiencia RT",
+                      f"{best['dod_pct']:.0f}% / {best['roundtrip_efficiency_pct']:.0f}%")
+        st.caption("ℹ️ " + best["life_note"])
+
+    # ── 3) Sensibilidad: ¿cómo escala el respaldo con las horas? ───────────────
+    st.markdown("<h3 class='section-title'>3️⃣ Sensibilidad — CAPEX vs horas de respaldo</h3>",
+                unsafe_allow_html=True)
+    st.caption("Cómo crecen las unidades, la energía requerida y el CAPEX del mejor arreglo "
+               "conforme pides cubrir apagones más largos (misma carga crítica).")
+    _hrs = list(range(1, 13))
+    _sweep = [propose_bess(float(p_crit_kw), float(h), usd_mxn=usd_mxn)["best"] for h in _hrs]
+    _capex = [(o["capex_mxn"] if o else 0.0) for o in _sweep]
+    _ereq = [(o["e_req_kwh"] if o else 0.0) for o in _sweep]
+    _units = [(o["units"] if o else 0) for o in _sweep]
+
+    from plotly.subplots import make_subplots
+    fig_sweep = make_subplots(specs=[[{"secondary_y": True}]])
+    fig_sweep.add_trace(go.Bar(x=_hrs, y=_capex, name="CAPEX (MXN)",
+                               marker_color="#0039A6"), secondary_y=False)
+    fig_sweep.add_trace(go.Scatter(x=_hrs, y=_ereq, name="Energía requerida (kWh)",
+                                   line=dict(color="#F57C00", width=3),
+                                   mode="lines+markers"), secondary_y=True)
+    fig_sweep.add_vline(x=backup_hours, line_dash="dash", line_color="#2E7D32",
+                        annotation_text=f"Seleccionado: {backup_hours} h", annotation_position="top")
+    fig_sweep.update_layout(template="plotly_white", height=380,
+                            xaxis_title="Horas de respaldo", hovermode="x unified",
+                            legend=dict(orientation="h", y=-0.2), margin=dict(t=20, b=50))
+    fig_sweep.update_yaxes(title_text="CAPEX (MXN)", secondary_y=False)
+    fig_sweep.update_yaxes(title_text="Energía requerida (kWh)", secondary_y=True, showgrid=False)
+    chart_with_export(fig_sweep, key="gdmto_backup_sweep", filename="respaldo_vs_horas")
+
+    sw1, sw2, sw3 = st.columns(3)
+    custom_metric(sw1, "Unidades @ horas elegidas", f"{best['units']}")
+    custom_metric(sw2, "Rango de unidades (1–12 h)", f"{min(_units)}–{max(_units)}")
+    custom_metric(sw3, "CAPEX @ 12 h", f"$ {_capex[-1]:,.0f} MXN")
+
+    # ── 4) Alternativas del catálogo ──────────────────────────────────────────
+    st.markdown("<h3 class='section-title'>4️⃣ Alternativas del catálogo</h3>", unsafe_allow_html=True)
+    alt_rows = [{
+        "Modelo": f"{o['brand']} {o['model']}",
+        "Química": o["chemistry"],
+        "Unidades": o["units"],
+        "Energía útil (kWh)": f"{o['total_usable_kwh']:,.1f}",
+        "Potencia (kW)": f"{o['total_power_kw']:,.1f}",
+        "Ciclos": f"{o['cycles']:,}",
+        "Vida est. (años)": f"{o['life_years_daily_cycling']:.1f}",
+        "CAPEX (MXN)": f"$ {o['capex_mxn']:,.0f}",
+    } for o in prop["options"]]
+    st.dataframe(pd.DataFrame(alt_rows), use_container_width=True, hide_index=True)
+    st.caption("Todas cumplen ambas restricciones: energía (E_req = P·h / (DoD × η_inv)) y "
+               "potencia (P ≥ carga crítica). El **ROI / continuidad** se evalúa en la "
+               "página **📈 Economía** (hereda esta cotización).")
     st.stop()
 
 # ── Prerequisites ─────────────────────────────────────────────────────────────
