@@ -376,6 +376,126 @@ battery = None
 bat_kwh = 0.0
 bat_idx = 0
 
+# ── LECTURA DE RECIBO CFE CON IA ──────────────────────────────────────────────
+st.divider()
+st.markdown("## 📄 Leer recibo CFE con IA *(opcional)*")
+st.caption("Sube una foto o PDF de tu recibo CFE y Claude extraerá automáticamente los datos clave.")
+
+import base64, anthropic as _anthropic, json as _json
+
+uploaded_bill = st.file_uploader(
+    "Sube tu recibo CFE (PNG, JPG o PDF)",
+    type=["png", "jpg", "jpeg", "pdf"],
+    key="cfe_bill_upload",
+)
+
+if uploaded_bill is not None:
+    file_bytes = uploaded_bill.read()
+    file_b64   = base64.b64encode(file_bytes).decode("utf-8")
+    ext        = uploaded_bill.name.split(".")[-1].lower()
+    media_type = "application/pdf" if ext == "pdf" else f"image/{'jpeg' if ext == 'jpg' else ext}"
+
+    if ext in ("png", "jpg", "jpeg"):
+        st.image(file_bytes, caption="Recibo cargado", width=420)
+
+    if st.button("🤖 Extraer datos del recibo con IA", type="primary"):
+        with st.spinner("Claude está leyendo tu recibo…"):
+            try:
+                client = _anthropic.Anthropic()
+
+                content_block = (
+                    {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": file_b64}}
+                    if ext == "pdf" else
+                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": file_b64}}
+                )
+
+                prompt = """Eres un experto en tarifas eléctricas de CFE México.
+Analiza este recibo CFE y extrae ÚNICAMENTE los siguientes campos en formato JSON válido, sin texto adicional:
+
+{
+  "ciudad": "nombre de la ciudad tal como aparece",
+  "region_cfe": "una de: Norte, Noreste, Noroeste, Centro, Sur, Sureste, Peninsular, Baja California, Baja California Sur",
+  "tarifa": "GDMTH, GDMTO, DAC, u otra que aparezca",
+  "consumo_kwh": número,
+  "demanda_maxima_kw": número o null,
+  "factor_de_potencia_pct": número entre 0-100 o null,
+  "costo_total_mxn": número,
+  "costo_por_kwh_mxn": número o null
+}
+
+Si un campo no aparece en el recibo pon null. Responde SOLO con el JSON."""
+
+                response = client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=512,
+                    messages=[{"role": "user", "content": [content_block, {"type": "text", "text": prompt}]}],
+                )
+
+                raw = response.content[0].text.strip()
+                if raw.startswith("```"):
+                    raw = raw.split("```")[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                data = _json.loads(raw.strip())
+
+                st.success("✅ Recibo leído correctamente")
+
+                col_r1, col_r2, col_r3 = st.columns(3)
+                custom_metric(col_r1, "Ciudad detectada",   data.get("ciudad") or "—")
+                custom_metric(col_r2, "Región CFE",         data.get("region_cfe") or "—")
+                custom_metric(col_r3, "Tarifa",             data.get("tarifa") or "—")
+
+                col_r4, col_r5, col_r6 = st.columns(3)
+                custom_metric(col_r4, "Consumo (kWh)",      str(data.get("consumo_kwh") or "—"))
+                custom_metric(col_r5, "Demanda máx. (kW)",  str(data.get("demanda_maxima_kw") or "—"))
+                custom_metric(col_r6, "Factor de potencia", f"{data.get('factor_de_potencia_pct')} %" if data.get("factor_de_potencia_pct") else "—")
+
+                col_r7, col_r8, _ = st.columns(3)
+                custom_metric(col_r7, "Total recibo (MXN)", f"${data.get('costo_total_mxn') or '—':,}")
+                custom_metric(col_r8, "Costo/kWh (MXN)",   f"${data['costo_por_kwh_mxn']:.2f}" if data.get("costo_por_kwh_mxn") else "—")
+
+                # ── Autocompletar session_state ─────────────────────────────
+                updated = []
+
+                detected_city = data.get("ciudad", "")
+                for c in CITIES:
+                    if detected_city and detected_city.lower() in c.lower():
+                        st.session_state["city"] = c
+                        updated.append(f"Ciudad → **{c}**")
+                        break
+
+                detected_region = data.get("region_cfe", "")
+                if detected_region and detected_region in TARIFF["regions"]:
+                    st.session_state["region"] = detected_region
+                    updated.append(f"Región CFE → **{detected_region}**")
+
+                detected_tarifa = data.get("tarifa", "")
+                if detected_tarifa in ("GDMTH", "GDMTO"):
+                    st.session_state["tariff_mode"] = detected_tarifa
+                    updated.append(f"Modo tarifario → **{detected_tarifa}**")
+
+                if data.get("consumo_kwh"):
+                    st.session_state["bill_consumo_kwh"]       = float(data["consumo_kwh"])
+                    updated.append(f"Consumo → **{data['consumo_kwh']} kWh**")
+                if data.get("demanda_maxima_kw"):
+                    st.session_state["bill_demanda_maxima_kw"] = float(data["demanda_maxima_kw"])
+                    updated.append(f"Demanda máxima → **{data['demanda_maxima_kw']} kW**")
+                if data.get("factor_de_potencia_pct"):
+                    st.session_state["bill_fp_pct"]            = float(data["factor_de_potencia_pct"])
+                    updated.append(f"Factor de potencia → **{data['factor_de_potencia_pct']} %**")
+                if data.get("costo_por_kwh_mxn"):
+                    st.session_state["bill_costo_kwh_mxn"]     = float(data["costo_por_kwh_mxn"])
+                    updated.append(f"Costo/kWh → **${data['costo_por_kwh_mxn']:.2f} MXN**")
+
+                if updated:
+                    st.info("Campos autocompletados:\n" + "\n".join(f"• {u}" for u in updated))
+                    st.rerun()
+
+            except _json.JSONDecodeError:
+                st.error("No se pudo parsear la respuesta. Intenta con una imagen más clara.")
+            except Exception as e:
+                st.error(f"Error al llamar la API: {e}")
+
 # ── EXCHANGE RATE ─────────────────────────────────────────────────────────────
 st.divider()
 col_fx, _ = st.columns([1, 2])

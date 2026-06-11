@@ -144,9 +144,10 @@ def chart_with_export(
     data = df if df is not None else figure_to_dataframe(fig)
     fname = _slug(filename or key)
 
-    with st.expander("⬇️ Guardar / exportar datos (CSV / Excel)", expanded=False):
+    with st.container():
+        st.markdown("**⬇️ Guardar / exportar datos (CSV / Excel)**")
         if data is None or data.empty:
-            st.caption("Esta gráfica no tiene datos tabulares exportables.")
+            st.caption("Esta gráfica no tiene datos tabul   ares exportables.")
             return
         c1, c2 = st.columns(2)
         c1.download_button(
