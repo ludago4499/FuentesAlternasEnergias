@@ -386,8 +386,7 @@ import base64, anthropic as _anthropic, json as _json
 uploaded_bill = st.file_uploader(
     "Sube tu recibo CFE (PNG, JPG o PDF)",
     type=["png", "jpg", "jpeg", "pdf"],
-    key="cfe_bill_upload",
-)
+    )
 
 if uploaded_bill is not None:
     file_bytes = uploaded_bill.read()
@@ -401,7 +400,8 @@ if uploaded_bill is not None:
     if st.button("🤖 Extraer datos del recibo con IA", type="primary"):
         with st.spinner("Claude está leyendo tu recibo…"):
             try:
-                client = _anthropic.Anthropic()
+                import os
+                client = _anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
                 content_block = (
                     {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": file_b64}}
