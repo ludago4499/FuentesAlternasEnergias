@@ -193,6 +193,37 @@ def test_continuity_page_computes_roi_with_quote_and_outage():
     assert any("VPN" in l for l in labels)
 
 
+def test_economics_inherits_pv_system_from_config_page():
+    # GDMTH/advanced flow: the PV system saved by ⚙️ Configuración (panel,
+    # n_panels, panel_capex_usd) plus the 🌞 Análisis Solar irradiance run is
+    # enough for the economics page — no Sección 2 (main.py) state needed.
+    import json
+    import numpy as np
+    import pandas as pd
+
+    panel = json.load(open(APP_DIR / "data" / "panels.json", encoding="utf-8"))[0]
+    idx = pd.date_range("2024-03-21", periods=24, freq="h", tz="America/Mexico_City")
+    poa = np.clip(900.0 * np.sin(np.pi * (np.arange(24) - 6) / 12.0), 0.0, None)
+    df_irr = pd.DataFrame({"poa_global": poa, "ghi": poa, "dni": poa, "dhi": poa * 0.2},
+                          index=idx)
+    df_irr.attrs["dt_h"] = 1.0
+
+    at = AppTest.from_file(str(APP_DIR / "pages" / "6_economics.py"), default_timeout=60)
+    at.session_state["tariff_mode"] = "GDMTH"
+    at.session_state["panel"] = panel
+    at.session_state["n_panels"] = 20
+    at.session_state["panel_capex_usd"] = 20 * panel["wp"] * panel["usd_per_w"]
+    at.session_state["irradiance_df"] = df_irr
+    at.run()
+    assert not at.exception
+    # Express FV saving derived from config → "con paneles" scenario appears
+    labels = list(_custom_metrics(at))
+    assert any("con paneles" in l for l in labels)
+    assert any("LCOE" in l for l in labels)
+    # Inherited-source caption mentions Configuración
+    assert any("Configuración" in getattr(md, "value", "") for md in at.caption)
+
+
 def test_config_page_with_residential_tool():
     at = AppTest.from_file(str(APP_DIR / "pages" / "2_config.py"), default_timeout=60)
     at.run()

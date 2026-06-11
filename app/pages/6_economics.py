@@ -10,8 +10,11 @@ Variables heredadas (st.session_state):
   Cotización / CAPEX de baterías
       - Página Baterías  : battery_capex_usd · use_battery (× usd_mxn → MXN)
       - Sección 3 (main) : bess_proposal["capex_mxn"]
-  Ahorro, CAPEX y generación FV
-      - ahorro_fv_anual · s2_fv_capex_mxn · s2_gen_monthly · s2_panel (opcionales)
+  Ahorro, CAPEX y generación FV (dos fuentes posibles)
+      - Sección 2 (main)  : ahorro_fv_anual · s2_fv_capex_mxn · s2_gen_monthly ·
+                            s2_panel · s2_temp_loss_kwh
+      - ⚙️ Configuración  : panel · n_panels · panel_capex_usd (+ irradiance_df
+                            de 🌞 Análisis Solar para anualizar la generación)
   Costo de apagones
       - outage_cost_annual (input manual de esta página)
 
@@ -30,6 +33,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.jensen import compute_pv_generation
 from core.pv_finance import (annual_net_benefits, series_cashflows, cashflow_irr,
                              lcoe_mxn_kwh, cooling_vs_extra_panels, investment_metrics)
 from core.plots import continuity_cashflow_bar, tradeoff_npv_bar
@@ -119,13 +123,98 @@ inflation_pct = fp2.number_input("Inflación (%/año)", min_value=0.0, max_value
 discount_pct = fp3.number_input("Tasa de descuento (%)", min_value=1.0, max_value=25.0,
                                 value=10.0, step=0.5, key="cont_disc")
 
-# ── Variables heredadas: ahorro, CAPEX y generación FV ────────────────────────
-ahorro_fv = float(st.session_state.get("ahorro_fv_anual", 0.0))
-fv_capex_mod = float(st.session_state.get("s2_fv_capex_mxn", 0.0))
-gen_monthly = st.session_state.get("s2_gen_monthly") or []
-annual_gen_kwh = float(sum(gen_monthly))
-costo_kwh = float(st.session_state.get("costo_promedio_kwh", 2.67))
+# ── Variables heredadas: sistema FV (Sección 2 ó ⚙️ Configuración) ────────────
+costo_kwh = float(st.session_state.get("demand_costo_kwh")
+                  or st.session_state.get("costo_promedio_kwh", 2.67))
+
+
+def _s2_fv_source() -> dict | None:
+    """PV system captured in Sección 2 of the standalone main page (GDMTO)."""
+    capex_mod = float(st.session_state.get("s2_fv_capex_mxn", 0.0) or 0.0)
+    ahorro = float(st.session_state.get("ahorro_fv_anual", 0.0) or 0.0)
+    if capex_mod <= 0 and ahorro <= 0:
+        return None
+    return {
+        "label": "Sección 2 (página principal)",
+        "panel": st.session_state.get("s2_panel"),
+        "n_panels": int(st.session_state.get("s2_n_panels_input", 0) or 0),
+        "capex_mod_mxn": capex_mod,
+        "gen_annual_kwh": float(sum(st.session_state.get("s2_gen_monthly") or [])),
+        "temp_loss_kwh": float(st.session_state.get("s2_temp_loss_kwh", 0.0) or 0.0),
+        "ahorro_anual": ahorro,
+        "ahorro_is_express": False,
+    }
+
+
+def _config_fv_source() -> dict | None:
+    """PV system saved in ⚙️ Configuración (GDMTH / advanced flow). Generation
+    and thermal loss are derived from the irradiance run saved by 🌞 Análisis
+    Solar (with/without temp-coefficient passes, annualized to 365 days); the
+    tariff saving is an express estimate (kWh × average $/kWh) until the GDMTH
+    flow exports a formal one."""
+    panel = st.session_state.get("panel")
+    n = int(st.session_state.get("n_panels", 0) or 0)
+    capex_mod = float(st.session_state.get("panel_capex_usd", 0.0) or 0.0) * usd_mxn
+    if panel is None or n <= 0 or capex_mod <= 0:
+        return None
+    gen = loss_kwh = 0.0
+    df_irr = st.session_state.get("irradiance_df")
+    if df_irr is not None and len(df_irr) > 0:
+        _kwargs = dict(system_kwp=n * panel["wp"] / 1000.0,
+                       panel_efficiency=panel["efficiency_pct"], panel_wp=panel["wp"],
+                       panel_area_m2=panel.get("area_m2"), n_panels=n,
+                       noct=panel.get("noct", 43))
+        pv = compute_pv_generation(
+            df_irr, temp_coeff_pmax=panel.get("temp_coeff_pmax", -0.30), **_kwargs)
+        pv_ideal = compute_pv_generation(df_irr, temp_coeff_pmax=0.0, **_kwargs)
+        dt_h = df_irr.attrs.get("dt_h", 1.0)
+        days = max(len(df_irr) * dt_h / 24.0, 1.0)
+        scale = 365.0 / days
+        gen = float(pv.sum() * dt_h) * scale
+        loss_kwh = max(float(pv_ideal.sum() * dt_h) * scale - gen, 0.0)
+    return {
+        "label": "⚙️ Configuración (avanzado)",
+        "panel": panel,
+        "n_panels": n,
+        "capex_mod_mxn": capex_mod,
+        "gen_annual_kwh": gen,
+        "temp_loss_kwh": loss_kwh,
+        "ahorro_anual": gen * costo_kwh,
+        "ahorro_is_express": True,
+    }
+
+
+_FV_EMPTY = {"label": "—", "panel": None, "n_panels": 0, "capex_mod_mxn": 0.0,
+             "gen_annual_kwh": 0.0, "temp_loss_kwh": 0.0, "ahorro_anual": 0.0,
+             "ahorro_is_express": False}
+_fv_sources = [s for s in (_s2_fv_source(), _config_fv_source()) if s]
+if len(_fv_sources) > 1:
+    # Both flows captured a system: let the user pick, defaulting to the flow
+    # that matches the active tariff mode.
+    _pref = 1 if st.session_state.get("tariff_mode") == "GDMTH" else 0
+    _fi = st.radio("Fuente del sistema FV", range(len(_fv_sources)), index=_pref,
+                   format_func=lambda i: _fv_sources[i]["label"],
+                   horizontal=True, key="eco_fv_source")
+    _fv = _fv_sources[_fi]
+elif _fv_sources:
+    _fv = _fv_sources[0]
+    st.caption(f"Sistema FV heredado de: **{_fv['label']}**")
+else:
+    _fv = _FV_EMPTY
+
+ahorro_fv = float(_fv["ahorro_anual"])
+fv_capex_mod = float(_fv["capex_mod_mxn"])
+annual_gen_kwh = float(_fv["gen_annual_kwh"])
 _fv_on = fv_capex_mod > 0 or ahorro_fv > 0
+if _fv["ahorro_is_express"] and ahorro_fv > 0:
+    st.caption(f"💡 Ahorro FV **estimado express** (Configuración no exporta ahorro "
+               f"tarifario): {annual_gen_kwh:,.0f} kWh/año × $ {costo_kwh:.2f}/kWh "
+               f"= **$ {ahorro_fv:,.2f}/año**. Corre 🌞 Análisis Solar con un rango "
+               f"amplio para mejorar la anualización.")
+if _fv["panel"] is not None and _fv["n_panels"] > 0:
+    _p = _fv["panel"]
+    st.caption(f"🔆 Sistema: **{_fv['n_panels']} × {_p['brand']} {_p['model']}** "
+               f"({_fv['n_panels'] * _p['wp'] / 1000.0:.2f} kWp)")
 
 # ── Supuestos avanzados del sistema FV ────────────────────────────────────────
 with st.expander("⚙️ Supuestos avanzados del sistema FV", expanded=_fv_on):
@@ -158,8 +247,9 @@ st.markdown(f"**CAPEX baterías:** $ {capex_batt:,.2f} MXN · **CAPEX FV:** $ {f
             f"**Beneficio anual:** apagones evitados $ {outage_cost:,.2f}"
             + (f" + ahorro FV $ {ahorro_fv:,.2f}" if _fv_on else ""))
 if not _fv_on:
-    st.caption("ℹ️ Sin ahorro tarifario FV heredado — completa la **Sección 2** (paneles > 0 y "
-               "evaluación económica) para incluir el escenario *Con paneles*.")
+    st.caption("ℹ️ Sin sistema FV heredado — completa la **Sección 2** (página principal, "
+               "paneles > 0 y evaluación económica) o guarda la **⚙️ Configuración** "
+               "(flujo avanzado) para incluir el escenario *Con paneles*.")
 
 if outage_cost <= 0 and ahorro_fv <= 0:
     st.info("Ingresa el costo anual por apagones para evaluar el ROI.")
@@ -251,25 +341,26 @@ st.subheader("⚖️ Trade-off tecnológico")
 
 # ── A) Enfriamiento activo vs módulos adicionales ─────────────────────────────
 st.markdown("#### ❄️ Enfriamiento activo vs módulos adicionales")
-panel = st.session_state.get("s2_panel")
-n_panels = int(st.session_state.get("s2_n_panels_input", 0) or 0)
+panel = _fv["panel"]
+n_panels = int(_fv["n_panels"])
 
 if annual_gen_kwh <= 0 or panel is None or n_panels <= 0:
-    st.info("Necesitas la generación FV de la **Sección 2** (paneles > 0 en la página "
-            "principal) para evaluar este trade-off.")
+    st.info("Necesitas un sistema FV con generación: captura paneles en la **Sección 2** "
+            "(página principal) o guarda la **⚙️ Configuración** y corre **🌞 Análisis "
+            "Solar** (flujo avanzado).")
 else:
     st.caption("¿Conviene invertir en enfriar los paneles para recuperar la energía perdida "
                "por temperatura, o es más barato instalar módulos adicionales que generen "
                "esa misma energía?")
 
-    # Thermal loss: inherited from the with/without-NOCT-derate year runs in
-    # main.py (exact under the model). Manual fallback if the keys are absent
-    # (e.g. older session).
+    # Thermal loss: inherited from the with/without-NOCT-derate passes of the
+    # selected source (exact under the model). Manual fallback if absent.
     gamma = abs(float(panel.get("temp_coeff_pmax", -0.30)))
-    temp_loss_kwh = float(st.session_state.get("s2_temp_loss_kwh", 0.0) or 0.0)
-    temp_loss_pct = float(st.session_state.get("s2_temp_loss_pct", 0.0) or 0.0)
+    temp_loss_kwh = float(_fv["temp_loss_kwh"])
     if temp_loss_kwh > 0:
-        st.caption(f"🌡️ Pérdida térmica **heredada del modelo NOCT** (Sección 2): "
+        _ideal_kwh = annual_gen_kwh + temp_loss_kwh
+        temp_loss_pct = temp_loss_kwh / _ideal_kwh * 100.0 if _ideal_kwh > 0 else 0.0
+        st.caption(f"🌡️ Pérdida térmica **heredada del modelo NOCT** ({_fv['label']}): "
                    f"**{temp_loss_kwh:,.0f} kWh/año** ({temp_loss_pct:.1f} % de la generación "
                    f"ideal a 25 °C de celda).")
     else:
@@ -277,7 +368,8 @@ else:
             "Pérdida térmica anual (%) — estimación manual", min_value=0.0, max_value=20.0,
             value=5.0, step=0.5, format="%.1f", key="eco_temp_loss",
             help="No se encontró la pérdida térmica del modelo (recalcula la Sección 2 en "
-                 "la página principal). Estimación típica en clima mexicano: 4–8 %.")
+                 "la página principal o corre 🌞 Análisis Solar). Estimación típica en "
+                 "clima mexicano: 4–8 %.")
         # gen = ideal·(1−p/100) → loss = gen·(p/100)/(1−p/100)
         temp_loss_kwh = annual_gen_kwh * (temp_loss_pct / 100.0) / max(1.0 - temp_loss_pct / 100.0, 1e-9)
 
@@ -348,8 +440,8 @@ else:
 # ── B) Costo de oportunidad: FV vs BESS ───────────────────────────────────────
 st.markdown("#### 🔆 FV vs 🔋 BESS — costo de oportunidad")
 if not _fv_on or fv_capex <= 0:
-    st.info("Completa la **Sección 2** (ahorro FV) para comparar el rendimiento de cada "
-            "peso invertido en paneles vs en baterías.")
+    st.info("Necesitas un sistema FV heredado (Sección 2 o ⚙️ Configuración) para comparar "
+            "el rendimiento de cada peso invertido en paneles vs en baterías.")
 elif capex_batt <= 0 or outage_cost <= 0:
     st.info("Para comparar contra el BESS necesitas una **cotización de baterías** y un "
             "**costo anual por apagones** mayores a 0 (el beneficio de la batería en GDMTO "
